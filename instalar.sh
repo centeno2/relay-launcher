@@ -1,65 +1,56 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-cd "$ROOT"
 DATA_BASE="${XDG_DATA_HOME:-$HOME/.local/share}"
 APP_DIR="$DATA_BASE/bo2-zombies-linux/app"
 BIN_DIR="$HOME/.local/bin"
 APPS_DIR="$DATA_BASE/applications"
-command -v python3 >/dev/null || { echo 'ERROR: Falta Python 3' >&2; exit 1; }
-mkdir -p "$APP_DIR" "$BIN_DIR" "$APPS_DIR" "$APP_DIR/bo2launcher"
-if [[ ! -x "$APP_DIR/.venv/bin/python" ]]; then
-  python3 -m venv "$APP_DIR/.venv"
+if [[ "${1:-}" == "--prefix" && -n "${2:-}" && $# -eq 2 ]]; then
+  APP_DIR="$2/share/relay/app"
+  BIN_DIR="$2/bin"
+  APPS_DIR="$2/share/applications"
+elif [[ $# -ne 0 ]]; then
+  echo 'Uso: ./instalar.sh [--prefix /ruta/absoluta]' >&2
+  exit 2
 fi
-"$APP_DIR/.venv/bin/python" -m pip install --disable-pip-version-check -r "$ROOT/requirements.txt"
+if [[ "$APP_DIR" != /* ]]; then
+  echo 'El directorio de instalación debe ser una ruta absoluta.' >&2
+  exit 2
+fi
+command -v python3 >/dev/null || { echo 'Instala Python 3.12 o posterior.' >&2; exit 1; }
+mkdir -p "$APP_DIR/bo2launcher" "$BIN_DIR" "$APPS_DIR"
 cp -a "$ROOT/bo2launcher/." "$APP_DIR/bo2launcher/"
-# Remove old AI illustration/assets left by previous versions. No game files are touched.
-rm -f "$APP_DIR/assets/zombies-cinematic.png" "$APP_DIR/assets/zombies-cinematic.svg" \
-      "$APP_DIR/assets/bo2-launcher.png" "$APP_DIR/assets/bo2-launcher.svg" 2>/dev/null || true
-cat > "$BIN_DIR/bo2-launcher" <<EOF
-#!/usr/bin/env bash
-set -e
-cd "${APP_DIR}"
-exec "${APP_DIR}/.venv/bin/python" -m bo2launcher.gui "\$@"
-EOF
-chmod 755 "$BIN_DIR/bo2-launcher"
-cat > "$BIN_DIR/bo2-zombies-linux" <<EOF
-#!/usr/bin/env bash
-exec "${BIN_DIR}/bo2-launcher" "\$@"
-EOF
-chmod 755 "$BIN_DIR/bo2-zombies-linux"
-cat > "$BIN_DIR/bo2-diagnostico" <<EOF
-#!/usr/bin/env bash
-set -e
-cd "${APP_DIR}"
-exec "${APP_DIR}/.venv/bin/python" -m bo2launcher.diagnostico "\$@"
-EOF
+cp "$ROOT/requirements.txt" "$ROOT/start.py" "$APP_DIR/"
+python3 "$APP_DIR/start.py" --install-only
+for entry in relay-launcher bo2-launcher bo2-zombies-linux; do
+  printf '#!/usr/bin/env bash\ncd -- %q\nexec %q -m bo2launcher.gui "$@"\n' \
+    "$APP_DIR" "$APP_DIR/.venv/bin/python" > "$BIN_DIR/$entry"
+  chmod 755 "$BIN_DIR/$entry"
+done
+printf '#!/usr/bin/env bash\ncd -- %q\nexec %q -m bo2launcher.diagnostico "$@"\n' \
+  "$APP_DIR" "$APP_DIR/.venv/bin/python" > "$BIN_DIR/bo2-diagnostico"
 chmod 755 "$BIN_DIR/bo2-diagnostico"
-cat > "$APPS_DIR/bo2-launcher.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=BO2 Launcher
-GenericName=Zombies Launcher
-Exec=${BIN_DIR}/bo2-launcher
-Icon=applications-games
-Terminal=false
-Categories=Game;
-StartupNotify=true
-StartupWMClass=bo2-launcher
-EOF
-rm -f "$APPS_DIR/bo2-zombies-linux.desktop"
-# Legacy cartoon icon from v0.4 must not override the real Steam game icon.
-rm -f "$DATA_BASE/icons/hicolor/512x512/apps/bo2-launcher.png"
-if [[ -n "${NIRI_SOCKET:-}" ]]; then
-  if (cd "$APP_DIR" && "$APP_DIR/.venv/bin/python" -c 'from bo2launcher.niri_integration import set_enabled; set_enabled(True)'); then
-    echo 'Niri: consola técnica oculta visualmente (proceso del juego intacto).'
-  else
-    echo 'AVISO: No se pudo activar la regla de Niri. Revísala desde Configuración del launcher.' >&2
-  fi
+python3 - "$APPS_DIR/bo2-launcher.desktop" "$BIN_DIR/relay-launcher" "$APP_DIR/bo2launcher/assets/relay.svg" <<'PY'
+from pathlib import Path
+import sys
+
+def quoted(value):
+    # Desktop Entry escaping is applied before Exec command-line unquoting.
+    for char in ('\\', '"', '`', '$'):
+        value = value.replace(char, '\\' + char)
+    return '"' + value.replace('\\', '\\\\').replace('%', '%%') + '"'
+
+Path(sys.argv[1]).write_text('\n'.join([
+    '[Desktop Entry]', 'Type=Application', 'Name=Relay',
+    'GenericName=BO2 Zombies Launcher', 'Comment=Tu próxima ronda empieza aquí.',
+    'Exec=' + quoted(sys.argv[2]), 'Icon=' + sys.argv[3],
+    'Terminal=false', 'Categories=Game;', 'StartupNotify=true',
+    'StartupWMClass=bo2-launcher', '',
+]), encoding='utf-8')
+PY
+if command -v update-desktop-database >/dev/null; then
+  update-desktop-database "$APPS_DIR" || true
 fi
-echo 'BO2 Launcher v0.11 instalado. Tu Wine, configuración y juego se conservaron.' 
-if ! command -v xvfb-run >/dev/null || ! command -v xauth >/dev/null; then
-  echo 'Opcional para actualizaciones sin ventanas en Niri: sudo pacman -S --needed xorg-server-xvfb xorg-xauth'
-fi
-echo "Abre el launcher con: ${BIN_DIR}/bo2-launcher"
-echo "Diagnóstico desde cualquier carpeta: ${BIN_DIR}/bo2-diagnostico --red"
+echo 'Relay instalado. Ábrelo desde el menú de aplicaciones.'
+echo "También puedes ejecutar: $BIN_DIR/relay-launcher"
+echo 'Tu configuración, Wine y archivos del juego se conservaron.'

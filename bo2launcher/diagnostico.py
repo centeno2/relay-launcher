@@ -2,6 +2,7 @@
 import re
 import sys
 from . import backend as b
+from . import __version__
 
 
 def redact(text: str) -> str:
@@ -12,7 +13,7 @@ def redact(text: str) -> str:
 
 
 def main():
-    print("=== BO2 Launcher 0.11 · Diagnóstico local ===")
+    print(f"=== Relay {__version__} · Diagnóstico local ===")
     game = b.find_game()
     checks = (
         ("Archivos de BO2", game, game is not None),
@@ -24,14 +25,16 @@ def main():
         ("Cliente oficial (online)", b.official_game_launcher_path(), b.official_game_launcher_path() is not None),
     )
     for title, path, ok in checks:
+        if b.IS_WINDOWS and title in ("Wine privado", "Prefijo Wine", "DXVK"):
+            continue
         print(f"{'OK' if ok else 'FALTA':5} {title}: {path or '(no encontrado)'}")
-    print(f"Motor BO2 Zombies (Wine): {'DETECTADO' if b.game_process_alive() else 'NO DETECTADO'}")
+    print(f"Motor BO2 Zombies: {'DETECTADO' if b.game_process_alive() else 'NO DETECTADO'}")
     print(f"Consola T6 (Niri): {'DETECTADA' if b.game_console_visible() else 'NO DETECTADA'}")
     print(f"Config(s) de sesión: {len(b.account_session_paths())} (presencia NO significa sesión válida; no se leen tokens)")
     if game:
         statuses = {
             'sincronizado': 'OK · t6Path corresponde a la carpeta seleccionada',
-            'pendiente-ruta': 'PENDIENTE · se puede corregir desde BO2 Launcher',
+            'pendiente-ruta': 'PENDIENTE · se puede corregir desde Relay',
             'pendiente-cliente': 'PENDIENTE · instalar/iniciar primero el cliente oficial',
             'configuracion-invalida': 'REVISAR · config.json no es compatible o no se pudo leer',
             'configuracion-insegura': 'REVISAR · configuración enlazada',

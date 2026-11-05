@@ -4,6 +4,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import platform
 from pathlib import Path
 from datetime import datetime
 import re
@@ -16,11 +17,11 @@ from urllib.parse import urlencode
 import urllib.request
 import urllib.error
 from typing import Callable
+from .platforms import IS_WINDOWS, app_paths, windows_client_dir, windows_steam_paths, windows_processes
+from . import __version__
 
 APP = "bo2-zombies-linux"
-DATA = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / APP
-CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP
-STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / APP
+DATA, CONFIG, STATE, CACHE = app_paths()
 PREFIX = DATA / "prefix"
 WINE_DIR = DATA / "runtime" / "wine"
 DXVK_DIR = DATA / "runtime" / "dxvk"
@@ -66,7 +67,7 @@ def save_config(**kwargs) -> None:
     tmp.replace(config_path())
 
 def steam_library_paths() -> list[Path]:
-    bases = [
+    bases = windows_steam_paths() if IS_WINDOWS else [
         Path.home() / ".steam/steam",
         Path.home() / ".local/share/Steam",
         Path.home() / ".var/app/com.valvesoftware.Steam/.local/share/Steam",
@@ -153,7 +154,7 @@ def download(url: str, dest: Path, digest: str | None, algorithm: str, log: Repo
     digest_path = dest.with_name(dest.name + ".part")
     h = hashlib.new(algorithm)
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "BO2-Zombies-Linux/0.2"})
+        req = urllib.request.Request(url, headers={"User-Agent": f"Relay/{__version__}"})
         with urllib.request.urlopen(req, timeout=60) as resp, digest_path.open("wb") as f:
             total = int(resp.headers.get("Content-Length", 0))
             got = 0
@@ -279,8 +280,15 @@ def setup_plutonium(log: Reporter, refresh: bool = False) -> None:
     log("✓ Cliente oficial descargado desde cdn.plutonium.pw")
 
 def preflight() -> list[tuple[str, bool, str]]:
+    if IS_WINDOWS:
+        return [
+            ("Windows x64", platform.machine().lower() in ("amd64", "x86_64"), "Windows 10/11 x64"),
+            ("Archivos BO2 Zombies", find_game() is not None, "Elige la carpeta del juego"),
+            ("Plutonium", PLUTONIUM.is_file(), "Se descarga del servidor oficial"),
+            ("Motor T6", bootstrapper_path() is not None, "Actualizar componentes"),
+        ]
     checks = []
-    checks.append(("Linux x86_64", os.uname().sysname == "Linux" and os.uname().machine == "x86_64", "Arquitectura compatible"))
+    checks.append(("Linux x86_64", platform.system() == "Linux" and platform.machine() == "x86_64", "Arquitectura compatible"))
     checks.append(("Steam instalado", bool(shutil.which("steam")) or (Path.home() / ".steam/steam").exists(), "Para obtener archivos originales de BO2"))
     vulkan_ok = False
     if shutil.which("vulkaninfo"):
@@ -297,7 +305,14 @@ def preflight() -> list[tuple[str, bool, str]]:
     return checks
 
 def run_setup(log: Reporter) -> None:
-    if os.uname().sysname != "Linux" or os.uname().machine != "x86_64":
+    if IS_WINDOWS:
+        if platform.machine().lower() not in ("amd64", "x86_64"):
+            raise RuntimeError("Se requiere Windows x64")
+        ensure_dirs()
+        setup_plutonium(log)
+        log("✓ Plutonium preparado para Windows. Usa Actualizar componentes y abre la sesión oficial.")
+        return
+    if platform.system() != "Linux" or platform.machine() != "x86_64":
         raise RuntimeError("Se requiere Linux x86_64")
     ensure_dirs()
     setup_wine(log)
@@ -309,14 +324,16 @@ def run_setup(log: Reporter) -> None:
         log("✓ Entorno y runtimes Windows preparados")
     else:
         log("⚠ No se encontró winetricks. El launcher está preparado, pero faltan redistribuibles Windows.")
-        log("Instala: sudo pacman -S winetricks cabextract; después usa el botón Dependencias")
+        log("Instala winetricks y cabextract con el gestor de paquetes de tu distribución; después usa Librerías Windows.")
 
 def install_windows_deps(log: Reporter) -> None:
     """Winetricks del sistema instala los redistribuibles al prefijo privado.
     Paquete Linux opcional: el script NO pide sudo ni altera ~/.wine.
     """
+    if IS_WINDOWS:
+        raise RuntimeError("Consulta los requisitos de Windows en https://plutonium.pw/docs/system-requirements/")
     if not shutil.which("winetricks"):
-        raise RuntimeError("Necesitas el paquete del sistema winetricks para los redistribuibles: sudo pacman -S winetricks cabextract")
+        raise RuntimeError("Instala winetricks y cabextract con el gestor de paquetes de tu distribución")
     if not wine_path() or not (PREFIX / "system.reg").exists():
         raise RuntimeError("Prepara primero Wine y el prefijo")
     stamp = CONFIG / "winetricks-runtimes-v1.installed"
@@ -335,6 +352,9 @@ def install_windows_deps(log: Reporter) -> None:
 
 def bootstrapper_path() -> Path | None:
     """Busca los ejecutables que el actualizador oficial instaló en el prefijo."""
+    if IS_WINDOWS:
+        exe = windows_client_dir() / "bin" / BOOTSTRAPPER_EXE
+        return exe if exe.is_file() and exe.stat().st_size > 0 else None
     users = PREFIX / "drive_c" / "users"
     if not users.is_dir():
         return None
@@ -358,6 +378,9 @@ def official_game_launcher_path() -> Path | None:
     No es el bootstrapper: el cliente gestiona la autenticación online.
     No accede al contenido de config.json ni a tokens de sesión.
     """
+    if IS_WINDOWS:
+        exe = windows_client_dir() / "bin/plutonium-launcher-win32.exe"
+        return exe if exe.is_file() and exe.stat().st_size > 0 else None
     users = PREFIX / "drive_c" / "users"
     if not users.is_dir():
         return None
@@ -375,6 +398,8 @@ def _game_path_in_prefix(game: Path) -> str:
     This deliberately does not invoke the provider's executable or read tokens.
     """
     game = game.resolve(strict=True)
+    if IS_WINDOWS:
+        return str(game)
     dosdevices = PREFIX / "dosdevices"
     candidates = []
     if dosdevices.is_dir():
@@ -427,6 +452,9 @@ def official_game_path_status(game: Path) -> str:
 def official_client_running(proc_root: Path = Path("/proc")) -> bool:
     """Prevent racing writes against the provider's own settings manager."""
     wanted = {"plutonium-launcher-win32.exe", "plutonium.exe"}
+    if IS_WINDOWS:
+        # Conservatively block config edits if a matching client cannot be inspected.
+        return any(str(row.get("name") or "").lower() in wanted for row in windows_processes())
     token = ("WINEPREFIX=" + str(PREFIX)).encode("utf-8")
     try:
         entries = proc_root.iterdir()
@@ -500,7 +528,8 @@ def sync_official_game_path(game: Path) -> bool:
     fd, temporary_name = tempfile.mkstemp(prefix=".config-bo2-", dir=config.parent)
     tmp = Path(temporary_name)
     try:
-        os.fchmod(fd, 0o600)
+        if not IS_WINDOWS:
+            os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as out:
             out.write(encoded)
         tmp.replace(config)
@@ -515,14 +544,14 @@ def build_online_command(game: Path) -> list[str]:
     La carpeta del juego también debe estar configurada en el cliente oficial.
     """
     wine = wine_path()
-    if wine is None or not (PREFIX / "system.reg").is_file():
+    if not IS_WINDOWS and (wine is None or not (PREFIX / "system.reg").is_file()):
         raise RuntimeError("Wine todavía no está configurado")
     if not is_game_dir(game):
         raise RuntimeError("Selecciona una carpeta válida de BO2 Zombies")
     launcher = official_game_launcher_path()
     if launcher is None:
         raise RuntimeError("Falta el cliente oficial; abre la sesión oficial para instalarlo")
-    return [str(wine), str(launcher), OFFICIAL_T6ZM_URI]
+    return ([str(wine)] if not IS_WINDOWS else []) + [str(launcher), OFFICIAL_T6ZM_URI]
 
 
 def launch_online_game() -> tuple[subprocess.Popen, str]:
@@ -545,6 +574,9 @@ def launch_online_game() -> tuple[subprocess.Popen, str]:
 
 def account_session_paths() -> list[Path]:
     """Encuentra solo configuraciones del proveedor en este prefijo (sin leer secretos)."""
+    if IS_WINDOWS:
+        config = windows_client_dir() / "config.json"
+        return [config] if config.is_file() and not config.is_symlink() else []
     users = PREFIX / "drive_c" / "users"
     if not users.is_dir():
         return []
@@ -561,6 +593,8 @@ def backup_online_session() -> list[Path]:
     Solo debe llamarse después de confirmar que los procesos del cliente
     oficial están cerrados. Los respaldos pueden contener tokens: modo 0600.
     """
+    if game_process_alive() or official_client_running():
+        raise RuntimeError("Cierra BO2 y el cliente oficial antes de reparar la sesión")
     backups = []
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     for src in account_session_paths():
@@ -601,6 +635,13 @@ def game_process_alive(proc_root: Path = Path("/proc")) -> bool:
     Linux exposes Wine processes under different executable names depending on
     the build. Compare cmdline and comm, and require this exact WINEPREFIX.
     """
+    if IS_WINDOWS:
+        for row in windows_processes():
+            args = row.get("cmdline") or []
+            cmdline = b"\0".join(str(arg).encode("utf-8") for arg in args)
+            if _process_is_t6(cmdline, str(row.get("name") or "").encode("utf-8")):
+                return True
+        return False
     token = ("WINEPREFIX=" + str(PREFIX)).encode("utf-8")
     try:
         processes = proc_root.iterdir()
@@ -629,7 +670,7 @@ def game_console_visible() -> bool:
     This is a display-only indicator, not proof the player authenticated.
     Crucially this does not close or terminate the game's required console.
     """
-    if not os.environ.get("NIRI_SOCKET") or not shutil.which("niri"):
+    if IS_WINDOWS or not os.environ.get("NIRI_SOCKET") or not shutil.which("niri"):
         return False
     try:
         result = subprocess.run(
@@ -651,6 +692,8 @@ def game_session_visible() -> bool:
 
 def wine_game_path(path: Path) -> str:
     """Convierte una ruta POSIX a la representación Windows del mismo prefijo."""
+    if IS_WINDOWS:
+        return str(path.resolve())
     exe = wine_path()
     if exe is None:
         raise RuntimeError("No se encontró Wine privado")
@@ -696,11 +739,11 @@ def validate_server_address(value: str) -> str:
 
 
 def build_game_command(game: Path, *, lan: bool = False, server: str | None = None,
-                       player_name: str = "Centeno") -> list[str]:
+                       player_name: str = "Player") -> list[str]:
     """El bootstrapper oficial inicia BO2 sin abrir primero su launcher web."""
     exe = bootstrapper_path()
     wine = wine_path()
-    if wine is None or not (PREFIX / "system.reg").is_file():
+    if not IS_WINDOWS and (wine is None or not (PREFIX / "system.reg").is_file()):
         raise RuntimeError("Wine no está configurado. Ejecuta Instalar componentes.")
     if exe is None:
         raise RuntimeError(
@@ -711,7 +754,7 @@ def build_game_command(game: Path, *, lan: bool = False, server: str | None = No
         raise RuntimeError("La carpeta de BO2 Zombies no es válida. Revísala en Configuración.")
     if not isinstance(player_name, str) or not 1 <= len(player_name.strip()) <= 24 or re.search(r'[\r\n"\x00]', player_name):
         raise ValueError("El nombre de jugador no es válido (1-24 caracteres sin comillas)")
-    args = [str(wine), str(exe), "t6zm", wine_game_path(game), "+name", player_name.strip()]
+    args = ([str(wine)] if not IS_WINDOWS else []) + [str(exe), "t6zm", wine_game_path(game), "+name", player_name.strip()]
     if lan:
         args.append("-lan")
     if server:
@@ -725,16 +768,18 @@ def build_game_command(game: Path, *, lan: bool = False, server: str | None = No
 
 
 def _spawn_wine(cmd: list[str], *, cwd: Path, logfile: str) -> subprocess.Popen:
+    """Launch natively on Windows and in the private prefix on Linux."""
     ensure_dirs()
+    options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if IS_WINDOWS else {"start_new_session": True}
     with (STATE / logfile).open("ab") as out:
         return subprocess.Popen(
-            cmd, cwd=str(cwd), env=wine_env(), stdout=out,
-            stderr=subprocess.STDOUT, start_new_session=True,
+            cmd, cwd=str(cwd), env=os.environ.copy() if IS_WINDOWS else wine_env(), stdout=out,
+            stderr=subprocess.STDOUT, **options,
         )
 
 
 def launch_game(*, lan: bool = False, server: str | None = None,
-                player_name: str = "Centeno") -> subprocess.Popen:
+                player_name: str = "Player") -> subprocess.Popen:
     game = find_game()
     if game is None:
         raise RuntimeError("Selecciona primero una carpeta válida de BO2 Zombies")
@@ -745,9 +790,9 @@ def launch_game(*, lan: bool = False, server: str | None = None,
 
 def launch_plutonium(*, update_only: bool = False) -> subprocess.Popen:
     """Primer inicio/autenticación o mantenimiento del updater oficial."""
-    if not PLUTONIUM.exists() or not wine_path() or not (PREFIX / "system.reg").exists():
-        raise RuntimeError("Debes preparar Wine y Plutonium antes de continuar")
-    cmd = [str(wine_path()), str(PLUTONIUM)]
+    if not PLUTONIUM.exists() or not runtime_ready():
+        raise RuntimeError("Instala los componentes antes de continuar")
+    cmd = ([str(wine_path())] if not IS_WINDOWS else []) + [str(PLUTONIUM)]
     if update_only:
         cmd.append("-update-only")
     return _spawn_wine(cmd, cwd=PLUTONIUM_DIR, logfile="plutonium.log")
@@ -767,7 +812,7 @@ def check_connections(log: Reporter) -> None:
         ("Cuenta online", "platform.plutonium.pw", "https://platform.plutonium.pw/"),
     )
     failed = []
-    log("Diagnóstico de red desde Arch Linux (no desde Wine):")
+    log("Diagnóstico de red desde " + platform.system() + ":")
     for title, hostname, url in endpoints:
         try:
             records = socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
@@ -791,67 +836,66 @@ def check_connections(log: Reporter) -> None:
             log(f"  {title}: HTTPS FALLÓ ({type(exc).__name__}: {exc})")
     if failed:
         log("⚠ Conexión fallida con: " + ", ".join(failed))
-        log("Prueba: 'getent ahosts cdn.plutonium.pw', 'ip route get 1.1.1.1' y 'curl -Iv https://cdn.plutonium.pw/updater/plutonium.exe'.")
-        log("No desactives la validación TLS ni borres el prefijo para solucionar errores de red.")
+        log("Revisa DNS, conexión, proxy y firewall del sistema.")
     else:
-        log("✓ Arch Linux puede acceder a los servicios comprobados.")
-        log("Si Wine sigue mostrando 10065, revisa conectividad IPv4/IPv6, DNS, firewall, proxy o el servicio remoto.")
-        log("El diagnóstico del anfitrión no comprueba automáticamente la autenticación dentro de Wine.")
+        log("✓ El sistema puede acceder a los servicios comprobados.")
+        log("La conectividad no confirma que la cuenta de Plutonium esté autenticada.")
+
+
+def runtime_ready() -> bool:
+    return IS_WINDOWS or bool(wine_path() and (PREFIX / "system.reg").is_file())
+
+
+def component_status() -> list[tuple[str, bool]]:
+    checks = [] if IS_WINDOWS else [
+        ("Wine", wine_path() is not None),
+        ("entorno Wine", (PREFIX / "system.reg").is_file()),
+        ("DXVK", (CONFIG / f"dxvk-{DXVK_VER}.installed").is_file()),
+    ]
+    return checks + [("Plutonium", PLUTONIUM.is_file())]
 
 
 def update_engine(log: Reporter) -> None:
-    """Lanza el actualizador legítimo en un Xvfb aislado: sin ventanas en Niri.
-
-    No se usa Xvfb para el login (requiere interacción), ni para el juego (debe
-    mostrarse). No altera/bypassea los controles de autenticación o integridad.
-    """
-    if not wine_path() or not (PREFIX / "system.reg").is_file():
-        raise RuntimeError("Configura Wine y el prefijo antes de actualizar el cliente.")
-    if not shutil.which("xvfb-run") or not shutil.which("Xvfb") or not shutil.which("xauth"):
-        raise RuntimeError(
-            "Falta el entorno gráfico virtual para actualizar sin ventanas. "
-            "Instala: sudo pacman -S xorg-server-xvfb xorg-xauth"
-        )
-    log("Descargando el ejecutable oficial más reciente por HTTPS...")
+    """Run the official updater, optionally using a virtual display on Linux."""
+    if not runtime_ready():
+        raise RuntimeError("Instala los componentes antes de actualizar el cliente.")
+    if game_process_alive() or official_client_running():
+        raise RuntimeError("Cierra BO2 y el cliente oficial antes de actualizar.")
+    log("Descargando el ejecutable oficial más reciente por HTTPS…")
     setup_plutonium(log, refresh=True)
-    log("Actualizando archivos del cliente en una pantalla virtual (sin abrir ventanas en Niri)...")
     ensure_dirs()
-    command = [
-        shutil.which("xvfb-run"), "-a", "-s", "-screen 0 1280x720x24 -nolisten tcp",
-        str(wine_path()), str(PLUTONIUM), "-update-only",
-    ]
-    # El archivo registra la salida completa; Qt solo recibe progreso legible.
-    update_env = wine_env()
-    # Niri expone WAYLAND_DISPLAY: forzar el backend X11 para que Wine no
-    # abra ventanas en Wayland nativo, fuera del servidor Xvfb invisible.
-    update_env.pop("WAYLAND_DISPLAY", None)
-    update_env["XDG_SESSION_TYPE"] = "x11"
+    command = ([str(wine_path())] if not IS_WINDOWS else []) + [str(PLUTONIUM), "-update-only"]
+    update_env = os.environ.copy() if IS_WINDOWS else wine_env()
+    virtual = not IS_WINDOWS and all(shutil.which(name) for name in ("xvfb-run", "Xvfb", "xauth"))
+    if virtual:
+        command = [shutil.which("xvfb-run"), "-a", "-s", "-screen 0 1280x720x24 -nolisten tcp"] + command
+        update_env.pop("WAYLAND_DISPLAY", None)
+        update_env["XDG_SESSION_TYPE"] = "x11"
+        log("Actualizando el cliente en una pantalla virtual…")
+    else:
+        log("Actualizando el cliente oficial; puede aparecer su ventana de progreso…")
     with (STATE / "updater.log").open("ab") as out:
-        out.write(b"\n=== BO2 Launcher: update-only (Xvfb) ===\n")
+        out.write(b"\n=== Relay: official update-only ===\n")
         try:
             finished = subprocess.run(
                 command, cwd=str(PLUTONIUM_DIR), env=update_env,
-                stdout=out, stderr=subprocess.STDOUT, timeout=420,
-                check=False,
+                stdout=out, stderr=subprocess.STDOUT, timeout=420, check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(
-                "El actualizador no terminó a tiempo; revisa Actividad y updater.log. "
-                "No se borraron tus archivos."
-            ) from exc
+            raise RuntimeError("El actualizador no terminó a tiempo. Revisa Actividad y updater.log.") from exc
     if finished.returncode != 0:
         raise RuntimeError(
             f"El proceso de actualización finalizó con código {finished.returncode}. "
-            f"Consulta {STATE / 'updater.log'}; puede ser un problema de red o TLS."
+            f"Consulta {STATE / 'updater.log'}."
         )
     if bootstrapper_path() is None:
         raise RuntimeError(
-            "El actualizador terminó, pero el componente que inicia BO2 todavía falta. "
-            "Verifica la conexión y consulta updater.log; si requiere ingreso, usa "
-            "'Abrir sesión oficial' en Opciones avanzadas."
+            "El actualizador terminó, pero falta el motor de BO2. Revisa updater.log "
+            "o usa Abrir sesión oficial en Configuración."
         )
     log("✓ El actualizador terminó y el ejecutable de BO2 está disponible.")
-    log("Esta comprobación no demuestra que la sesión online esté autenticada.")
+    log("La cuenta online se autentica desde la ventana oficial de Plutonium.")
+
 
 def fetch_servers() -> list[dict]:
     """Consulta lista comunitaria HTTPS; sin credenciales y fuera del hilo Qt."""

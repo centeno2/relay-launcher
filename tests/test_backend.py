@@ -10,6 +10,21 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bo2launcher import backend as b
 
+
+def setUpModule():
+    from unittest.mock import patch
+    temporary = tempfile.TemporaryDirectory()
+    unittest.addModuleCleanup(temporary.cleanup)
+    root = Path(temporary.name)
+    for key in ("DATA", "CONFIG", "STATE", "CACHE", "PREFIX", "WINE_DIR", "DXVK_DIR", "PLUTONIUM_DIR"):
+        patcher = patch.object(b, key, root / key.lower())
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+    patcher = patch.object(b, "PLUTONIUM", b.PLUTONIUM_DIR / "plutonium.exe")
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+
+
 class TestBackend(unittest.TestCase):
     def test_steam_game_dir_requires_exe_and_zone(self):
         with tempfile.TemporaryDirectory() as d:
@@ -58,6 +73,7 @@ class TestBackend(unittest.TestCase):
 from unittest import mock
 
 
+@unittest.skipIf(sys.platform == "win32", "Wine/Niri integration runs on Linux")
 class TestLaunchAndServers(unittest.TestCase):
     def test_bootstrapper_discovery(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -147,17 +163,17 @@ class TestLaunchAndServers(unittest.TestCase):
             self.assertEqual(spawn.call_args.kwargs['cwd'], client)
             self.assertEqual(spawn.call_args.kwargs['logfile'], 'game.log')
 
+@unittest.skipIf(sys.platform == "win32", "Wine/Niri integration runs on Linux")
 class TestUpdateAndDiagnosis(unittest.TestCase):
-    def test_update_requires_virtual_display(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            pref = Path(tmp) / 'prefix'
-            pref.mkdir()
-            (pref / 'system.reg').touch()
-            with mock.patch.object(b, 'PREFIX', pref), \
-                 mock.patch.object(b, 'wine_path', return_value=Path(tmp) / 'wine'), \
-                 mock.patch.object(b.shutil, 'which', return_value=None):
-                with self.assertRaisesRegex(RuntimeError, 'xorg-server-xvfb'):
-                    b.update_engine(lambda _message: None)
+    def test_update_without_virtual_display_uses_visible_wine(self):
+        with mock.patch.object(b, 'runtime_ready', return_value=True), \
+             mock.patch.object(b, 'wine_path', return_value=Path('/runtime/wine')), \
+             mock.patch.object(b, 'setup_plutonium'), \
+             mock.patch.object(b, 'bootstrapper_path', return_value=Path('/client/bootstrapper.exe')), \
+             mock.patch.object(b.shutil, 'which', return_value=None), \
+             mock.patch.object(b.subprocess, 'run', return_value=mock.Mock(returncode=0)) as run:
+            b.update_engine(lambda _message: None)
+        self.assertEqual(run.call_args.args[0], ['/runtime/wine', str(b.PLUTONIUM), '-update-only'])
 
     def test_updater_uses_virtual_display_and_disables_wayland(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -226,10 +242,9 @@ class TestUpdateAndDiagnosis(unittest.TestCase):
         self.assertNotIn('abc123', redact('https://example.test?a=1&token=abc123'))
 
 
-if __name__ == '__main__':
-    unittest.main()
 
 
+@unittest.skipIf(sys.platform == "win32", "Wine/Niri integration runs on Linux")
 class TestSessionRecoveryAndGameState(unittest.TestCase):
     def test_session_backup_preserves_file_and_private_permissions(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -271,6 +286,7 @@ class TestSessionRecoveryAndGameState(unittest.TestCase):
             self.assertFalse(b.game_process_alive(Path(tmp) / 'not-present'))
 
 
+@unittest.skipIf(sys.platform == "win32", "Wine/Niri integration runs on Linux")
 class TestOfficialOnlineLaunch(unittest.TestCase):
     def test_official_launcher_is_found_in_private_prefix(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -327,6 +343,7 @@ class TestOfficialOnlineLaunch(unittest.TestCase):
         self.assertEqual(b.OFFICIAL_T6ZM_URI, 'plutonium://play/t6zm')
 
 
+@unittest.skipIf(sys.platform == "win32", "Wine/Niri integration runs on Linux")
 class TestAutomaticPlutoniumGamePath(unittest.TestCase):
     """Simulated Wine prefix. Never opens a real client or reads real sessions."""
 
@@ -414,6 +431,7 @@ class TestAutomaticPlutoniumGamePath(unittest.TestCase):
         self.assertEqual(calls[0], ('sync', self.game))
         self.assertEqual(calls[1][0], 'spawn')
 
+@unittest.skipIf(sys.platform == "win32", "Wine/Niri integration runs on Linux")
 class TestOfficialClientRunning(unittest.TestCase):
     def test_sync_refuses_to_modify_settings_while_client_running(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -435,6 +453,7 @@ class TestOfficialClientRunning(unittest.TestCase):
                 b.sync_official_game_path(Path('/fake'))
 
 
+@unittest.skipIf(sys.platform == "win32", "Wine/Niri integration runs on Linux")
 class TestGameDetection2026(unittest.TestCase):
     def test_bootstrapper_with_zombies_token_counts(self):
         self.assertTrue(b._process_is_t6(b'wine\0plutonium-bootstrapper-win32.exe\0t6zm\0'))
@@ -468,6 +487,7 @@ class TestGameDetection2026(unittest.TestCase):
             self.assertFalse(b.game_console_visible())
 
 
+@unittest.skipIf(sys.platform == "win32", "Wine/Niri integration runs on Linux")
 class TestNiriRule2026(unittest.TestCase):
     def test_can_enable_and_disable_with_backup(self):
         from bo2launcher import niri_integration as ni
@@ -494,3 +514,7 @@ class TestNiriRule2026(unittest.TestCase):
                 ni.set_enabled(True)
             self.assertEqual(config.read_text(), 'layout {}\n')
             self.assertFalse((Path(td)/'bo2-console.kdl').exists())
+
+
+if __name__ == '__main__':
+    unittest.main()

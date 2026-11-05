@@ -7,6 +7,7 @@ retained by its owners. The source repository redistributes no game artwork.
 from __future__ import annotations
 import os
 from pathlib import Path
+from . import backend as b
 from PySide6.QtCore import QObject, Signal, QUrl
 from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
@@ -27,7 +28,7 @@ SOURCES = {
 
 
 def cache_dir() -> Path:
-    return Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "bo2-launcher" / "art"
+    return b.CACHE / "art"
 
 
 def cached_image(kind: str) -> Path | None:
@@ -35,10 +36,7 @@ def cached_image(kind: str) -> Path | None:
     if path.is_file() and not QPixmap(str(path)).isNull():
         return path
     # Installed Steam often already contains real art. Use it even when offline.
-    steam_roots = (
-        Path.home() / ".steam/steam/appcache/librarycache",
-        Path.home() / ".local/share/Steam/appcache/librarycache",
-    )
+    steam_roots = [root / "appcache/librarycache" for root in b.steam_library_paths()]
     file_names = {
         "poster": ("212910_library_600x900.jpg", "212910_library_600x900.png"),
         "hero": ("202970_library_hero.jpg", "212910_library_hero.jpg"),

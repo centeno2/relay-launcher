@@ -1,8 +1,4 @@
-"""BO2 Launcher v0.11. Native Qt launcher with direct BO2 Zombies startup.
-
-The artwork is fetched from Steam on the player's computer, not bundled.
-Existing Wine prefix, game data and settings are preserved.
-"""
+"""Relay: a desktop-native home for BO2 Zombies on Linux and Windows."""
 from __future__ import annotations
 import sys
 import time
@@ -10,8 +6,8 @@ import os
 from pathlib import Path
 # Reduce ruido de Qt en Niri sin silenciar avisos de Wine, Vulkan ni del proveedor.
 os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.wayland.textinput=false")
-from PySide6.QtCore import Qt, QRect, QSize, QThread, Signal, QUrl, QTimer
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPixmap, QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QRect, QRectF, QSize, QThread, Signal, QUrl, QTimer
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPixmap, QKeySequence, QShortcut, QPalette, QPen, QPainterPath, QFontDatabase
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar,
@@ -20,58 +16,12 @@ from PySide6.QtWidgets import (
 )
 from . import backend as b
 from . import artwork
+from . import APP_NAME, __version__, GAME_FILES_URL
+from .theme import ThemeManager
+
+ICON = Path(__file__).parent / "assets/relay.svg"
 from . import niri_integration as ni
 
-CSS = """
-* { font-family: 'Inter', 'Noto Sans', 'DejaVu Sans', sans-serif; }
-QMainWindow, QWidget#root, QWidget#page { background-color: #101114; color: #f0f0f1; }
-QLabel { background: transparent; color: #efeff1; }
-QLabel#brand { font-size: 15px; font-weight: 750; }
-QLabel#heading { font-size: 29px; font-weight: 750; }
-QLabel#gameSubtitle { font-size: 13px; font-weight: 550; color: #b5b6bd; }
-QLabel#caption { font-size: 12px; color: #9699a4; }
-QLabel#hint { font-size: 12px; color: #9699a4; }
-QLabel#rowTitle { font-size: 15px; font-weight: 700; }
-QFrame#divider { background-color: #303137; max-height: 1px; min-height: 1px; }
-QFrame#gameCard { background-color: rgba(13, 15, 21, 152); border: 1px solid rgba(184, 103, 66, 115); border-radius: 12px; }
-QWidget#homeContent { background: transparent; }
-QLabel#heroEyebrow { color: #f1a46f; font-size: 12px; font-weight: 800; }
-QLabel#heroTitle { color: #ffffff; font-size: 40px; font-weight: 850; }
-QLabel#heroNote { color: #d5d4d4; font-size: 13px; }
-QLabel#statusOK { color: #9fe3b3; font-size: 14px; font-weight: 700; }
-QFrame#setting { background-color: #1a1c22; border: 1px solid #30323c; border-radius: 9px; }
-QPushButton { background-color: #262931; color: #e7e7ec; border: 1px solid #383b45;
-              border-radius: 6px; padding: 10px 16px; font-size: 13px; font-weight: 600; }
-QPushButton:hover { background-color: #333741; border-color: #4b4d5b; }
-QPushButton:pressed { background-color: #414551; }
-QPushButton:disabled { color: #777982; background-color: #1e2026; border-color: #30313a; }
-QPushButton#play { background-color: #e56e2b; border: 1px solid #ed8a4d; color: #151313;
-                   font-size: 15px; font-weight: 800; padding: 12px 24px; border-radius: 6px; }
-QPushButton#play:hover { background-color: #f08748; }
-QPushButton#play:disabled { background-color: #6f4737; color: #bca99e; }
-QPushButton#link { background: transparent; border: none; color: #b6b8c1; padding: 6px 8px; }
-QPushButton#link:hover { color: #ffffff; background-color: #282b32; }
-QPushButton#tab { background: transparent; border: none; border-bottom: 2px solid transparent;
-                  border-radius: 0; padding: 12px 8px; color: #9699a2; }
-QPushButton#tabActive { background: transparent; border: none; border-bottom: 2px solid #ef8544;
-                        border-radius: 0; padding: 12px 8px; color: #f1f2f5; }
-QLineEdit { background: #111318; border: 1px solid #40434f; padding: 11px;
-            border-radius: 6px; font-size: 12px; color: #f2f2f4; }
-QLineEdit:focus { border-color: #d18459; }
-QPlainTextEdit { background: #111318; color: #dddfe5; border: 1px solid #32343e;
-                 border-radius: 6px; padding: 12px; font: 11px 'JetBrains Mono', monospace; }
-QCheckBox { color: #d5d5da; spacing: 9px; }
-QProgressBar { background: #252830; border: none; border-radius: 2px; max-height: 5px; }
-QProgressBar::chunk { background: #e4793b; }
-QScrollArea { border: none; background: transparent; }
-QTableWidget { background-color: #15171c; color: #e9e9ee; border: 1px solid #30323c;
-               gridline-color: #282b34; selection-background-color: #454452;
-               selection-color: #ffffff; alternate-background-color: #1d2027; }
-QHeaderView::section { background-color: #252831; color: #e1e1e6; border: none;
-                       padding: 9px 6px; font-weight: 600; }
-QScrollBar:vertical { background: #14151a; width: 8px; }
-QScrollBar::handle:vertical { background: #3b3d49; border-radius: 3px; }
-"""
 
 
 def label(content: str, name: str = "", wrap=False) -> QLabel:
@@ -96,10 +46,11 @@ def rule() -> QFrame:
 
 
 class HomeBackdrop(QWidget):
-    """Steam Zombies hero art with cinematic black/orange scrim and offline fallback."""
+    """A quiet signal motif offline; user or Steam artwork when available."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.pix = QPixmap()
+        self.setMinimumHeight(220)
         self.load(artwork.cached_image("hero"))
 
     def load(self, path):
@@ -107,26 +58,39 @@ class HomeBackdrop(QWidget):
         self.update()
 
     def paintEvent(self, event):
-        from PySide6.QtGui import QLinearGradient, QRadialGradient
+        from PySide6.QtGui import QLinearGradient
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         full = self.rect()
-        painter.fillRect(full, QColor("#0d1119"))
+        palette = self.palette()
+        base = palette.color(QPalette.ColorRole.Window)
+        accent = palette.color(QPalette.ColorRole.Highlight)
+        clip = QPainterPath()
+        clip.addRoundedRect(QRectF(full), 14, 14)
+        painter.setClipPath(clip)
+        painter.fillRect(full, base)
         if not self.pix.isNull():
             scaled = self.pix.scaled(full.size(), Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                                     Qt.TransformationMode.SmoothTransformation)
+                                    Qt.TransformationMode.SmoothTransformation)
             painter.drawPixmap(full, scaled, QRect((scaled.width() - full.width()) // 2,
-                                                   (scaled.height() - full.height()) // 2,
-                                                   full.width(), full.height()))
-        fade = QLinearGradient(0, 0, self.width(), self.height())
-        fade.setColorAt(0.0, QColor(5, 7, 12, 90))
-        fade.setColorAt(0.45, QColor(9, 9, 13, 130))
-        fade.setColorAt(1.0, QColor(8, 10, 15, 180))
-        painter.fillRect(full, fade)
-        glow = QRadialGradient(self.width() * .83, self.height() * .28, self.width() * .7)
-        glow.setColorAt(0.0, QColor(204, 83, 27, 42))
-        glow.setColorAt(1.0, QColor(0, 0, 0, 0))
-        painter.fillRect(full, glow)
+                               (scaled.height() - full.height()) // 2, full.width(), full.height()))
+            fade = QLinearGradient(0, 0, self.width(), 0)
+            fade.setColorAt(0, base)
+            fade.setColorAt(.49, QColor(base.red(), base.green(), base.blue(), 247))
+            fade.setColorAt(1, QColor(base.red(), base.green(), base.blue(), 55))
+            painter.fillRect(full, fade)
+        else:
+            # A relay signal, deliberately asymmetrical; no dependence on game art.
+            cx, cy = self.width() * .84, self.height() * .48
+            for index, radius in enumerate((58, 102, 146, 190, 234)):
+                tone = QColor(accent)
+                tone.setAlpha(90 - index * 15)
+                painter.setPen(QPen(tone, 1.5))
+                painter.drawArc(QRectF(cx-radius, cy-radius, radius*2, radius*2), 35*16, 285*16)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(accent)
+            painter.drawEllipse(QRectF(cx-6, cy-6, 12, 12))
         painter.end()
 
 
@@ -148,7 +112,7 @@ class Artwork(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         full = QRect(0, 0, self.width(), self.height())
-        painter.fillRect(full, QColor("#202127"))
+        painter.fillRect(full, self.palette().color(QPalette.ColorRole.Base))
         if not self.pix.isNull():
             # A store header is landscape; letterbox it rather than crop its logo.
             keep = (Qt.AspectRatioMode.KeepAspectRatio if self.pix.width() > self.pix.height() else
@@ -162,12 +126,12 @@ class Artwork(QWidget):
                 y = (scaled.height() - full.height()) // 2
                 painter.drawPixmap(full, scaled, QRect(x, y, full.width(), full.height()))
         else:
-            painter.setPen(QColor("#bebfc5"))
+            painter.setPen(self.palette().color(QPalette.ColorRole.PlaceholderText))
             font = painter.font()
             font.setPixelSize(23)
             font.setBold(True)
             painter.setFont(font)
-            painter.drawText(full, Qt.AlignmentFlag.AlignCenter, "BLACK OPS II\nZOMBIES")
+            painter.drawText(full, Qt.AlignmentFlag.AlignCenter, "Black Ops II\nZombies")
         painter.end()
 
 
@@ -199,11 +163,12 @@ class ServerWorker(QThread):
 
 
 class Launcher(QMainWindow):
-    def __init__(self):
+    def __init__(self, theme=None):
         super().__init__()
-        self.setWindowTitle("BO2 Launcher")
-        self.resize(970, 620)
-        self.setMinimumSize(800, 530)
+        self.theme = theme or ThemeManager(QApplication.instance(), b.load_config().get("theme", "system"))
+        self.setWindowTitle("Relay — BO2 Zombies")
+        self.resize(1020, 700)
+        self.setMinimumSize(760, 560)
         self.worker = None
         self.server_worker = None
         self.server_rows = []
@@ -215,13 +180,12 @@ class Launcher(QMainWindow):
         self.tabs = []
         self.fetcher = artwork.ArtworkFetcher(self)
         self.fetcher.changed.connect(self.art_received)
-        icon_file = artwork.cached_image("icon")
-        self.setWindowIcon(QIcon(str(icon_file)) if icon_file else QIcon.fromTheme("applications-games"))
+        self.setWindowIcon(QIcon(str(ICON)))
         root = QWidget(objectName="root")
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
-        outer.setContentsMargins(24, 10, 24, 18)
-        outer.setSpacing(4)
+        outer.setContentsMargins(26, 14, 26, 16)
+        outer.setSpacing(12)
         outer.addWidget(self.topbar())
         outer.addWidget(rule())
         self.pages = QStackedWidget()
@@ -247,7 +211,7 @@ class Launcher(QMainWindow):
         QShortcut(QKeySequence("Escape"), self, activated=lambda: self.goto(0))
         self.fetcher.fetch("poster")
         self.fetcher.fetch("hero")
-        self.fetcher.fetch("icon")
+        self.theme.changed.connect(self.update)
         self.game_timer = QTimer(self)
         self.game_timer.setInterval(3500)
         self.game_timer.timeout.connect(self.check_game)
@@ -257,9 +221,13 @@ class Launcher(QMainWindow):
         line = QWidget()
         row = QHBoxLayout(line)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(22)
-        name = label("BO2 LAUNCHER", "brand")
-        row.addWidget(name)
+        row.setSpacing(7)
+        mark = QLabel()
+        mark.setPixmap(QIcon(str(ICON)).pixmap(34, 34))
+        mark.setAccessibleName("Relay")
+        row.addWidget(mark)
+        row.addSpacing(4)
+        row.addWidget(label("Relay", "brand"))
         row.addStretch()
         for idx, text in ((0, "Jugar"), (3, "Servidores"), (1, "Configuración"), (2, "Actividad")):
             tab = button(text, lambda _=False, n=idx: self.goto(n), "tab")
@@ -268,60 +236,66 @@ class Launcher(QMainWindow):
         return line
 
     def make_home(self):
-        page = HomeBackdrop()
-        self.home_background = page
+        page = QWidget(objectName="page")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(18)
+        hero = HomeBackdrop()
+        self.home_background = hero
         bg_custom = b.load_config().get("background_image")
         if isinstance(bg_custom, str) and bg_custom and not QPixmap(bg_custom).isNull():
-            page.load(bg_custom)
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(12, 24, 12, 10)
-        lay.setSpacing(15)
-        game = QFrame(objectName="gameCard")
-        g = QHBoxLayout(game)
-        g.setSpacing(0)
-        g.setContentsMargins(0, 0, 0, 0)
-        self.cover = Artwork("poster")
-        self.cover.setMinimumWidth(220)
-        self.cover.setMaximumWidth(310)
-        g.addWidget(self.cover, 3)
-        content = QWidget(objectName="homeContent")
-        content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        c = QVBoxLayout(content)
-        c.setContentsMargins(31, 31, 28, 29)
-        c.setSpacing(8)
-        c.addWidget(label("CALL OF DUTY  /  BLACK OPS II", "heroEyebrow"))
-        c.addWidget(label("ZOMBIES", "heroTitle"))
-        c.addWidget(label("T6  ·  EDICIÓN PC  ·  NIRI / ARCH", "heroNote"))
-        c.addSpacing(12)
-        c.addWidget(rule())
-        c.addSpacing(8)
-        self.game_state = label("Comprobando…", "rowTitle")
-        c.addWidget(self.game_state)
-        self.game_detail = label("", "hint", True)
-        c.addWidget(self.game_detail)
-        c.addStretch()
-        ctas = QHBoxLayout()
-        ctas.setSpacing(10)
-        self.play = button("JUGAR", self.play_or_setup, "play")
-        self.play.setMinimumWidth(190)
-        ctas.addWidget(self.play)
-        self.servers_button = button("Abrir servidores", self.open_servers)
-        ctas.addWidget(self.servers_button)
-        ctas.addStretch()
-        c.addLayout(ctas)
-        g.addWidget(content, 6)
-        lay.addWidget(game, 1)
+            hero.load(bg_custom)
+        content = QVBoxLayout(hero)
+        content.setContentsMargins(26, 24, 26, 24)
+        content.setSpacing(2)
+        content.addStretch()
+        content.addWidget(label("Black Ops II", "gameSubtitle"))
+        content.addWidget(label("Zombies", "heroTitle"))
+        content.addSpacing(10)
+        content.addWidget(label("Tu próxima ronda empieza aquí.", "heroNote"))
+        content.addStretch()
+        lay.addWidget(hero, 1)
 
-        bottom = QHBoxLayout()
-        bottom.setContentsMargins(0, 3, 0, 0)
-        bottom.setSpacing(15)
-        bottom.addWidget(button("Archivos del juego", lambda: self.goto(1), "link"))
-        bottom.addWidget(button("Componentes", lambda: self.goto(1), "link"))
-        bottom.addWidget(button("Cambiar fondo", self.change_background, "link"))
-        bottom.addStretch()
-        bottom.addWidget(label("BO2 Launcher  ·  0.11", "caption"))
-        lay.addLayout(bottom)
+        status = QFrame(objectName="homeStatus")
+        row = QHBoxLayout(status)
+        row.setContentsMargins(22, 22, 22, 22)
+        row.setSpacing(22)
+        text = QVBoxLayout()
+        text.setSpacing(7)
+        self.game_state = label("Comprobando…", "rowTitle", True)
+        self.game_detail = label("", "hint", True)
+        text.addWidget(self.game_state)
+        text.addWidget(self.game_detail)
+        row.addLayout(text, 1)
+        self.play = button("Jugar", self.play_or_setup, "play")
+        self.play.setMinimumWidth(180)
+        row.addWidget(self.play)
+        lay.addWidget(status)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        actions.addWidget(button("Carpeta del juego", self.browse))
+        self.drive_button = button("Archivos en Drive", self.open_game_files)
+        self.drive_button.setToolTip("Abrir la carpeta compartida del juego en tu navegador")
+        actions.addWidget(self.drive_button)
+        actions.addStretch()
+        actions.addWidget(button("Cambiar fondo", self.change_background, "link"))
+        lay.addLayout(actions)
+        footer = QHBoxLayout()
+        footer.addWidget(label("Hecho para tu escritorio.", "caption"))
+        footer.addStretch()
+        footer.addWidget(label(("Windows" if b.IS_WINDOWS else "Linux") + "  /  " + __version__, "caption"))
+        lay.addLayout(footer)
         self.pages.addWidget(page)
+
+    def open_game_files(self):
+        QDesktopServices.openUrl(QUrl(GAME_FILES_URL))
+
+    def change_theme(self):
+        mode = self.theme_select.currentData()
+        b.save_config(theme=mode)
+        self.theme.apply(mode)
+        self.home_background.update()
 
     def scroll_page(self):
         page = QScrollArea()
@@ -347,6 +321,22 @@ class Launcher(QMainWindow):
     def make_settings(self):
         lay = self.scroll_page()
         lay.addWidget(label("Configuración", "heading"))
+        appearance, appearance_layout = self.setting_group("A tu manera", "Relay puede seguir los colores de tu escritorio.")
+        theme_row = QHBoxLayout()
+        theme_label = label("Apariencia", "rowTitle")
+        theme_row.addWidget(theme_label)
+        theme_row.addStretch()
+        self.theme_select = QComboBox()
+        for title, value in (("Sistema", "system"), ("Claro", "light"), ("Oscuro", "dark")):
+            self.theme_select.addItem(title, value)
+        self.theme_select.setCurrentIndex(max(0, self.theme_select.findData(self.theme.mode)))
+        self.theme_select.setAccessibleName("Apariencia")
+        theme_label.setBuddy(self.theme_select)
+        self.theme_select.setMinimumWidth(180)
+        self.theme_select.currentIndexChanged.connect(self.change_theme)
+        theme_row.addWidget(self.theme_select)
+        appearance_layout.addLayout(theme_row)
+        lay.addWidget(appearance)
         game, g = self.setting_group("Black Ops II", "Selecciona tu carpeta de BO2 Zombies (Steam o pluto_t6_full_game).")
         self.path = QLineEdit()
         self.path.setPlaceholderText("Carpeta de Black Ops II Zombies")
@@ -354,6 +344,7 @@ class Launcher(QMainWindow):
         g.addWidget(self.path)
         buttons = QHBoxLayout()
         buttons.addWidget(button("Buscar carpeta", self.browse))
+        buttons.addWidget(button("Archivos en Drive", self.open_game_files))
         buttons.addWidget(button("Steam", lambda: QDesktopServices.openUrl(QUrl("steam://install/212910"))))
         buttons.addStretch()
         buttons.addWidget(button("Guardar ruta", self.save_game))
@@ -362,13 +353,14 @@ class Launcher(QMainWindow):
         g.addWidget(self.path_status)
         lay.addWidget(game)
 
-        engine, e = self.setting_group("Entorno aislado", "Todos los componentes se guardan en un entorno separado, sin modificar ~/.wine.")
+        engine, e = self.setting_group("Componentes del juego", "Plutonium se ejecuta directamente en Windows." if b.IS_WINDOWS else "Wine y DXVK tienen su propio entorno. Tu configuración actual se conserva.")
         self.runtime = label("Comprobando componentes…", "hint")
         e.addWidget(self.runtime)
         self.nvidia = QCheckBox("Usar la GPU NVIDIA dedicada (PRIME)")
         self.nvidia.setChecked(bool(b.load_config().get("force_nvidia", False)))
         self.nvidia.toggled.connect(lambda enabled: b.save_config(force_nvidia=enabled))
         e.addWidget(self.nvidia)
+        self.nvidia.setVisible(not b.IS_WINDOWS)
         self.hide_console = QCheckBox("Ocultar consola técnica del juego en Niri")
         try:
             self.hide_console.setChecked(ni.is_enabled())
@@ -376,13 +368,12 @@ class Launcher(QMainWindow):
             pass
         self.hide_console.toggled.connect(self.toggle_console_visibility)
         e.addWidget(self.hide_console)
-        e.addWidget(label("La consola seguirá ejecutándose; solo se vuelve invisible en Niri. "
-                          "Puedes desactivar esta opción para verla y depurar.", "hint", True))
+        self.hide_console.setVisible(not b.IS_WINDOWS and bool(os.environ.get("NIRI_SOCKET")))
         user_row = QHBoxLayout()
         user_row.addWidget(label("Nombre de jugador:", "caption"))
         self.player_name = QLineEdit()
         self.player_name.setMaxLength(24)
-        self.player_name.setText(str(b.load_config().get("player_name", "Centeno")))
+        self.player_name.setText(str(b.load_config().get("player_name", "Player")))
         self.player_name.editingFinished.connect(lambda: b.save_config(player_name=self.player_name.text().strip()))
         user_row.addWidget(self.player_name)
         e.addLayout(user_row)
@@ -390,7 +381,7 @@ class Launcher(QMainWindow):
         self.lan.setChecked(bool(b.load_config().get("lan_mode", False)))
         self.lan.toggled.connect(lambda enabled: b.save_config(lan_mode=enabled))
         e.addWidget(self.lan)
-        e.addWidget(label("Online: JUGAR utiliza el acceso oficial a Zombies con cuenta autenticada. "
+        e.addWidget(label("Online: Jugar utiliza el acceso oficial a Zombies con cuenta autenticada. "
                           "LAN: inicia el motor directamente sin abrir el cliente de sesión. "
                           "La primera autenticación siempre se realiza en el cliente oficial.", "hint", True))
         row = QHBoxLayout()
@@ -398,6 +389,9 @@ class Launcher(QMainWindow):
         self.deps_button = button("Librerías Windows", lambda: self.run_task(b.install_windows_deps))
         row.addWidget(self.setup_button)
         row.addWidget(self.deps_button)
+        self.deps_button.setVisible(not b.IS_WINDOWS)
+        if b.IS_WINDOWS:
+            row.addWidget(button("Requisitos de Windows", lambda: QDesktopServices.openUrl(QUrl("https://plutonium.pw/docs/system-requirements/"))))
         row.addStretch()
         e.addLayout(row)
         service_actions = QHBoxLayout()
@@ -405,13 +399,13 @@ class Launcher(QMainWindow):
         service_actions.addWidget(button("Comprobar conexión", lambda: self.run_task(b.check_connections)))
         service_actions.addStretch()
         e.addLayout(service_actions)
-        self.advanced_button = button("▸ Opciones avanzadas / cuenta online", self.toggle_advanced, "link")
+        self.advanced_button = button("▸ Cuenta de Plutonium", self.toggle_advanced, "link")
         e.addWidget(self.advanced_button)
         self.advanced_panel, ap = self.setting_group(
-            "Sesión oficial y recuperación",
+            "Cuenta de Plutonium",
             "El cliente que inicia el juego es de Plutonium Project, un tercero. "
             "Para jugar online puede ser necesaria su autenticación oficial. "
-            "Por seguridad, BO2 Launcher no solicita ni guarda contraseñas."
+            "Relay no solicita ni guarda contraseñas."
         )
         ap.addWidget(button("Abrir sesión oficial (ventana externa)", self.init_plutonium))
         ap.addWidget(button("Reparar error 401 (respaldar sesión anterior)", self.repair_session))
@@ -419,19 +413,26 @@ class Launcher(QMainWindow):
                            "con respaldo y volver a iniciar sesión de forma oficial. "
                            "Cierra las ventanas del cliente antes de reparar.", "hint", True))
         ap.addWidget(label("El acceso oficial requiere una ventana visible. "
-                           "BO2 Launcher nunca solicita ni almacena tus contraseñas.", "hint", True))
+                           "Relay nunca solicita ni almacena tus contraseñas.", "hint", True))
         self.advanced_panel.setVisible(False)
         e.addWidget(self.advanced_panel)
         lay.addWidget(engine)
 
         art, a = self.setting_group("Arte del juego", "Se utiliza arte oficial descargado desde Steam o una imagen local elegida por ti.")
+        self.cover = Artwork("poster")
+        self.cover.setFixedSize(140, 180)
+        self.cover.setMinimumWidth(140)
+        custom = b.load_config().get("cover_image")
+        if isinstance(custom, str) and custom:
+            self.cover.load(custom)
+        a.addWidget(self.cover)
         art_buttons = QHBoxLayout()
         art_buttons.addWidget(button("Elegir imagen", self.change_art))
         art_buttons.addWidget(button("Restaurar arte oficial", self.reset_art))
         art_buttons.addWidget(button("SteamGridDB", lambda: QDesktopServices.openUrl(QUrl("https://www.steamgriddb.com/game/2077"))))
         art_buttons.addStretch()
         a.addLayout(art_buttons)
-        a.addWidget(label("Fondo cinematográfico", "rowTitle"))
+        a.addWidget(label("Fondo de inicio", "rowTitle"))
         bg_buttons = QHBoxLayout()
         bg_buttons.addWidget(button("Elegir fondo", self.change_background))
         bg_buttons.addWidget(button("Restaurar fondo de BO2", self.reset_background))
@@ -446,6 +447,7 @@ class Launcher(QMainWindow):
         logframe, l = self.setting_group("Registro de operaciones")
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
+        self.log.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
         self.log.setMinimumHeight(250)
         l.addWidget(self.log)
         self.progress = QProgressBar()
@@ -563,7 +565,7 @@ class Launcher(QMainWindow):
     def toggle_advanced(self):
         show = not self.advanced_panel.isVisible()
         self.advanced_panel.setVisible(show)
-        self.advanced_button.setText(("▾" if show else "▸") + " Opciones avanzadas / cuenta online")
+        self.advanced_button.setText(("▾" if show else "▸") + " Cuenta de Plutonium")
 
     def init_plutonium(self):
         if self.worker and self.worker.isRunning():
@@ -588,7 +590,7 @@ class Launcher(QMainWindow):
             return
         question = ("El error HTTP 401 puede indicar una sesión caducada.\n\n"
                     "Esta reparación RENOMBRA únicamente el config.json de la cuenta "
-                    "en el prefijo privado, conserva un respaldo y abre la sesión oficial "
+                    "del cliente oficial, conserva un respaldo y abre la sesión oficial "
                     "para que puedas entrar de nuevo.\n\n"
                     "Cierra primero cualquier ventana del cliente original. "
                     "¿Quieres continuar?")
@@ -605,12 +607,12 @@ class Launcher(QMainWindow):
                 self.write_log("No se encontró config.json de la cuenta. Se abrirá igualmente el inicio de sesión oficial.")
             proc = b.launch_plutonium()
             self.write_log(f"Inicio de sesión oficial abierto (PID {proc.pid}).")
-            self.game_detail.setText("Completa el inicio de sesión oficial y vuelve a JUGAR.")
+            self.game_detail.setText("Completa el inicio de sesión oficial y vuelve a Jugar.")
         except Exception as exc:
             QMessageBox.warning(self, "Recuperación de sesión", str(exc))
 
     def update_plutonium(self):
-        if self.game_process and self.game_process.poll() is None:
+        if b.game_process_alive() or b.official_client_running() or (self.game_process and self.game_process.poll() is None):
             QMessageBox.information(self, "Actualizar", "Cierra BO2 antes de actualizar los componentes.")
             return
         self.run_task(b.update_engine)
@@ -638,16 +640,16 @@ class Launcher(QMainWindow):
                 self.game_state.setText("Preparar cuenta online")
                 self.game_detail.setText("El cliente oficial está abierto para iniciar sesión. "
                                          "Nuestro launcher sincroniza la ruta de BO2 al tener el cliente instalado.")
-                self.play.setText("CONFIGURANDO CUENTA")
+                self.play.setText("Abriendo cuenta…")
             elif self.launch_method == "uri":
                 self.game_state.setText("Iniciando desde tu cuenta oficial...")
                 self.game_detail.setText("Se ha solicitado BO2 Zombies mediante la URI oficial. "
                                          "Si aparece la pantalla de sesión, autentícate allí.")
-                self.play.setText("ABRIENDO ZOMBIES...")
+                self.play.setText("Abriendo Zombies…")
             else:
                 self.game_state.setText("Iniciando Zombies (LAN)...")
                 self.game_detail.setText("Inicio local sin servidores públicos.")
-                self.play.setText("INICIANDO...")
+                self.play.setText("Iniciando…")
             self.play.setEnabled(False)
             if server:
                 QApplication.clipboard().setText("connect " + server)
@@ -664,9 +666,9 @@ class Launcher(QMainWindow):
         actual_game = b.game_session_visible()
         if actual_game:
             self.seen_game = True
-            self.game_state.setText("ZOMBIES  ·  EN PARTIDA")
+            self.game_state.setText("Zombies en curso")
             self.game_detail.setText("El motor de BO2 está abierto. ¡Disfruta la partida!")
-            self.play.setText("●  JUGANDO")
+            self.play.setText("En partida")
             self.play.setEnabled(False)
             return
         if self.seen_game:
@@ -678,7 +680,7 @@ class Launcher(QMainWindow):
             self.refresh()
             self.game_state.setText("Partida finalizada")
             self.game_detail.setText("El juego se cerró normalmente. Puedes volver a jugar.")
-            self.play.setText("▶  JUGAR")
+            self.play.setText("Jugar Zombies")
             self.play.setEnabled(True)
             return
         if self.game_process is None:
@@ -691,7 +693,7 @@ class Launcher(QMainWindow):
             self.game_state.setText("Iniciando Zombies...")
             self.game_detail.setText("El cliente oficial entregó el inicio al motor T6. "
                                      "Esperando que aparezca su proceso o consola.")
-            self.play.setText("INICIANDO...")
+            self.play.setText("Iniciando…")
             self.play.setEnabled(False)
             if code is not None and not self.launcher_exit_logged:
                 self.launcher_exit_logged = True
@@ -700,19 +702,19 @@ class Launcher(QMainWindow):
         if code is None and self.launch_method == "setup":
             self.game_state.setText("Configura la cuenta online")
             self.game_detail.setText("Termina el inicio de sesión en la ventana oficial.")
-            self.play.setText("CONFIGURANDO CUENTA")
+            self.play.setText("Abriendo cuenta…")
             self.play.setEnabled(False)
             return
         if code is None and elapsed < 70:
             self.game_state.setText("Iniciando Zombies...")
             self.game_detail.setText("Esperando al motor T6...")
-            self.play.setText("INICIANDO...")
+            self.play.setText("Iniciando…")
             self.play.setEnabled(False)
             return
         if code is None:
             self.game_state.setText("Arranque sin confirmar")
-            self.game_detail.setText("Wine sigue abierto. Comprueba si BO2 está abierto y revisa Actividad.")
-            self.play.setText("ESPERANDO JUEGO")
+            self.game_detail.setText("El proceso sigue abierto. Comprueba el juego y revisa Actividad.")
+            self.play.setText("Esperando juego")
             self.play.setEnabled(False)
             return
         self.write_log(f"No se detectó el motor tras iniciar el cliente ({code}). Registros en Actividad.")
@@ -722,7 +724,7 @@ class Launcher(QMainWindow):
         self.refresh()
         self.game_state.setText("No se confirmó el arranque")
         self.game_detail.setText("Puedes intentar nuevamente o revisar el registro.")
-        self.play.setText("▶  JUGAR")
+        self.play.setText("Jugar Zombies")
         self.play.setEnabled(True)
 
     def goto(self, idx: int):
@@ -741,38 +743,11 @@ class Launcher(QMainWindow):
             self.home_background.load(path)
         elif kind == "poster" and not b.load_config().get("cover_image"):
             self.cover.load(path)
-        elif kind == "icon":
-            self.setWindowIcon(QIcon(path))
-            self.install_desktop_icon(path)
-
-    def install_desktop_icon(self, path):
-        # Use the game's real Steam icon, never an AI-made app logo.
-        try:
-            pix = QPixmap(path)
-            if pix.isNull():
-                return
-            folder = Path.home() / ".local/share/icons/hicolor/256x256/apps"
-            folder.mkdir(parents=True, exist_ok=True)
-            target = folder / "bo2-launcher.png"
-            pix.scaled(256, 256, Qt.AspectRatioMode.KeepAspectRatio,
-                       Qt.TransformationMode.SmoothTransformation).save(str(target), "PNG")
-            desktop = Path.home() / ".local/share/applications/bo2-launcher.desktop"
-            if desktop.is_file():
-                raw = desktop.read_text(encoding="utf-8")
-                if "Name=BO2 Launcher" in raw and "Icon=applications-games" in raw:
-                    desktop.write_text(raw.replace("Icon=applications-games", "Icon=bo2-launcher"),
-                                       encoding="utf-8")
-        except OSError:
-            return
-
     def refresh(self):
         game = b.find_game()
-        wine = bool(b.wine_path())
-        prefix = (b.PREFIX / "system.reg").is_file()
-        plutonium = b.PLUTONIUM.is_file()
-        dxvk = (b.CONFIG / f"dxvk-{b.DXVK_VER}.installed").is_file()
+        components = b.component_status()
+        prepared = bool(game and all(ok for _, ok in components))
         bootstrapper = b.bootstrapper_path()
-        prepared = bool(game and wine and prefix and plutonium and dxvk)
         ready = bool(prepared and bootstrapper)
         busy = self.worker is not None and self.worker.isRunning()
         playing = b.game_session_visible()
@@ -785,28 +760,28 @@ class Launcher(QMainWindow):
         if ready:
             self.game_state.setText("Listo para jugar")
             self.game_detail.setText("Inicia Zombies directamente desde esta aplicación.")
-            self.play.setText("▶  JUGAR")
+            self.play.setText("Jugar Zombies")
         elif prepared and not bootstrapper:
             self.game_state.setText("Falta preparar el motor de juego")
             self.game_detail.setText("Actualiza los componentes en Configuración. "
                                      "Para jugar online, la cuenta también debe estar autenticada.")
-            self.play.setText("PREPARAR JUEGO")
+            self.play.setText("Preparar juego")
         elif not game:
             self.game_state.setText("Faltan archivos del juego")
             self.game_detail.setText("Selecciona tu carpeta de Black Ops II en Configuración.")
-            self.play.setText("CONFIGURAR")
+            self.play.setText("Configurar juego")
         else:
             self.game_state.setText("Instalación pendiente")
-            self.game_detail.setText("Prepara Wine y los componentes desde Configuración.")
-            self.play.setText("CONFIGURAR")
-        self.runtime.setText("Componentes listos" if (wine and prefix and plutonium and dxvk) else
-                             "Pendientes: " + ", ".join(n for n, ok in (("Wine", wine), ("prefijo", prefix), ("DXVK", dxvk), ("cliente de juego", plutonium)) if not ok))
+            self.game_detail.setText("Instala los componentes desde Configuración.")
+            self.play.setText("Configurar juego")
+        missing = [name for name, ok in components if not ok]
+        self.runtime.setText("Componentes listos" if not missing else "Pendientes: " + ", ".join(missing))
         if playing:
             self.game_state.setText("BO2 Zombies detectado")
-            self.play.setText("JUEGO DETECTADO")
+            self.play.setText("En partida")
         elif pending:
             self.game_state.setText("Inicio solicitado (sin confirmar)")
-            self.play.setText("INICIANDO...")
+            self.play.setText("Iniciando…")
         if game and not self.path.isModified():
             self.path.setText(str(game))
         return ready
@@ -850,7 +825,7 @@ class Launcher(QMainWindow):
             return
         messages = {
             "sincronizado": "✓ Carpeta de BO2 sincronizada con el cliente online",
-            "pendiente-ruta": "La carpeta online se sincronizará al pulsar JUGAR",
+            "pendiente-ruta": "La carpeta online se sincronizará al pulsar Jugar",
             "pendiente-cliente": "Carpeta guardada. El cliente online aún no está instalado",
             "configuracion-insegura": "La configuración oficial requiere revisión manual",
             "configuracion-invalida": "No se pudo leer la configuración oficial; comprueba Actividad",
@@ -901,7 +876,7 @@ class Launcher(QMainWindow):
     def run_task(self, fn):
         if self.worker and self.worker.isRunning():
             return
-        if b.game_process_alive() or (self.game_process and self.game_process.poll() is None):
+        if b.game_process_alive() or b.official_client_running() or (self.game_process and self.game_process.poll() is None):
             QMessageBox.information(self, "Proceso activo", "Cierra el juego o el proceso de inicio antes de modificar componentes.")
             return
         self.goto(2)
@@ -910,6 +885,7 @@ class Launcher(QMainWindow):
         self.worker.line.connect(self.write_log)
         self.worker.succeeded.connect(lambda: self.complete_task(None))
         self.worker.failed.connect(self.complete_task)
+        self.worker.finished.connect(self.refresh)
         self.progress.setRange(0, 0)
         self.setup_button.setEnabled(False)
         self.deps_button.setEnabled(False)
@@ -931,9 +907,9 @@ class Launcher(QMainWindow):
             return
         if not self.refresh():
             self.goto(1)
-            if b.find_game() and b.PLUTONIUM.is_file() and b.wine_path() and (b.PREFIX / "system.reg").is_file() and not b.bootstrapper_path():
+            if b.find_game() and b.PLUTONIUM.is_file() and b.runtime_ready() and not b.bootstrapper_path():
                 self.write_log("Falta el ejecutable de inicio. Usa 'Actualizar componentes'. "
-                               "Si necesitas iniciar sesión, abre Opciones avanzadas.")
+                               "Si necesitas iniciar sesión, abre Cuenta de Plutonium.")
             return
         self.start_game()
 
@@ -941,6 +917,10 @@ class Launcher(QMainWindow):
         self.goto(3)
 
     def closeEvent(self, event):
+        if self.worker and self.worker.isRunning():
+            QMessageBox.information(self, "Operación en curso", "Espera a que termine la instalación o actualización antes de cerrar Relay.")
+            event.ignore()
+            return
         # El acceso HTTPS es acotado (15 s). Evitar destruir un QThread vivo.
         if self.server_worker and self.server_worker.isRunning():
             self.server_worker.wait(16000)
@@ -953,14 +933,11 @@ class Launcher(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("BO2 Launcher")
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(__version__)
     app.setDesktopFileName("bo2-launcher")
-    app.setStyle("Fusion")
-    app.setStyleSheet(CSS)
-    win = Launcher()
-    custom = b.load_config().get("cover_image")
-    if custom and QPixmap(custom).isNull() is False:
-        win.cover.load(custom)
+    theme = ThemeManager(app, b.load_config().get("theme", "system"))
+    win = Launcher(theme)
     win.show()
     return app.exec()
 
