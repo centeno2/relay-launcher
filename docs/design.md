@@ -30,3 +30,40 @@ Revisión: se reemplaza el naranja fijo y la gran tarjeta oscura del diseño
 anterior por superficies del escritorio. El arte del juego vive dentro de su
 portada, sin dictar el color de los controles. La identidad funciona sin
 descargas de imágenes y sigue siendo reconocible en claro y oscuro.
+
+## Segunda dirección: biblioteca de juegos
+
+La portada pasa a usar el vocabulario de Steam y Battle.net: biblioteca lateral,
+arte panorámico, una acción principal grande y accesos secundarios debajo.
+
+- **Color:** carbón `#181D22`, panel `#20272E`, texto `#EEF1F4`, gris
+  `#A2ADB8`, brasa `#F2A154`, óxido `#CE713A`. La brasa identifica Zombies;
+  los controles generales siguen la paleta del escritorio.
+- **Tipo:** fuente nativa para la aplicación; una sans condensada disponible
+  en el sistema para el título de BO2, con alternativa nativa en negrita.
+- **Composición:** barra lateral de 196 px, banner panorámico con texto a la
+  izquierda y la escena de TranZit a la derecha. Botón Jugar dentro del banner;
+  estado debajo, con accesos a servidores, archivos y personalización.
+- **Adaptación:** la barra lateral se reduce a iconos en ventanas pequeñas;
+  el banner conserva su contraste tanto en tema claro como oscuro.
+- **Arte:** ilustración original inspirada en Zombies, incluida localmente.
+  El usuario puede reemplazarla; Steam queda como opción explícita.
+
+```text
+Relay       Biblioteca                         Online / LAN
+Biblioteca  ┌───────────────────────────────────────────────┐
+Servidores  │ CALL OF DUTY          escena de TranZit        │
+Actividad   │ BLACK OPS II           bus / niebla           │
+            │ ZOMBIES                                       │
+Tu juego    │ Sobrevive una ronda más.                      │
+BO2 Zombies │ [ Jugar Zombies ]  [ Configuración ]          │
+            └───────────────────────────────────────────────┘
+            Estado real de la instalación
+            Servidores           Archivos del juego / Drive
+Ajustes     Versión y acceso a personalizar
+```
+
+Revisión: la identidad visual anterior dependía de círculos decorativos y un
+espacio vacío que no comunicaban el juego. La nueva dirección concentra el
+protagonismo en una escena de Zombies. No se inventan noticias, jugadores
+conectados, horas de juego ni estados de cuenta.

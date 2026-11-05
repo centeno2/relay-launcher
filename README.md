@@ -4,7 +4,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/relay-dark.png">
-  <img src="docs/relay-light.png" alt="Relay: portada, estado del juego y accesos a configuración y Drive" width="1020">
+  <img src="docs/relay-light.png" alt="Relay: biblioteca lateral y banner de BO2 Zombies inspirado en TranZit" width="1180">
 </picture>
 
 ### Clona y ejecuta
@@ -33,10 +33,12 @@ cd relay-launcher
 2. En Relay, elige **Carpeta del juego**. En **Configuración**, pulsa **Instalar componentes** y después **Actualizar componentes**.
 3. Abre **Cuenta de Plutonium → Abrir sesión oficial**, inicia sesión y cierra esa ventana. Vuelve a **Jugar Zombies**.
 
-**A tu manera:** tema del sistema, claro u oscuro; fondo propio; servidores y modo LAN.
+**A tu manera:** biblioteca lateral, banner de Zombies incluido sin conexión, temas del sistema/claro/oscuro, servidores y modo LAN.
 Linux usa Wine + DXVK en un entorno separado. Windows ejecuta Plutonium directamente.
 
 En Linux puedes añadir Relay al menú de aplicaciones con `./instalar.sh`.
 Requisitos y ayuda: **[guía breve](docs/USO.md)**. Desarrollo y ramas: **[contribuir](CONTRIBUTING.md)**.
+
+El banner es [arte original de comunidad inspirado en TranZit](docs/banner-prompt.md).
 
 <sub>Proyecto comunitario independiente. El repositorio contiene el launcher; el juego y Plutonium conservan sus respectivos autores. Windows tiene soporte nativo implementado; la ejecución del juego en un equipo Windows está pendiente de validación.</sub>

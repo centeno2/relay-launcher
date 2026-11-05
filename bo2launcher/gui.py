@@ -18,6 +18,7 @@ from . import backend as b
 from . import artwork
 from . import APP_NAME, __version__, GAME_FILES_URL
 from .theme import ThemeManager
+from .icons import icon
 
 ICON = Path(__file__).parent / "assets/relay.svg"
 from . import niri_integration as ni
@@ -46,12 +47,13 @@ def rule() -> QFrame:
 
 
 class HomeBackdrop(QWidget):
-    """A quiet signal motif offline; user or Steam artwork when available."""
+    """A local Zombies panorama, readable in every desktop color scheme."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.pix = QPixmap()
-        self.setMinimumHeight(220)
-        self.load(artwork.cached_image("hero"))
+        self.setObjectName("zombiesHero")
+        self.setMinimumHeight(310)
+        self.load(artwork.home_image())
 
     def load(self, path):
         self.pix = QPixmap(str(path)) if path else QPixmap()
@@ -63,34 +65,26 @@ class HomeBackdrop(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         full = self.rect()
-        palette = self.palette()
-        base = palette.color(QPalette.ColorRole.Window)
-        accent = palette.color(QPalette.ColorRole.Highlight)
         clip = QPainterPath()
-        clip.addRoundedRect(QRectF(full), 14, 14)
+        clip.addRoundedRect(QRectF(full), 12, 12)
         painter.setClipPath(clip)
-        painter.fillRect(full, base)
+        painter.fillRect(full, QColor("#191d1d"))
         if not self.pix.isNull():
             scaled = self.pix.scaled(full.size(), Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                                     Qt.TransformationMode.SmoothTransformation)
-            painter.drawPixmap(full, scaled, QRect((scaled.width() - full.width()) // 2,
+            # Anchor to the right to retain the bus and foreground zombie on narrow windows.
+            painter.drawPixmap(full, scaled, QRect(scaled.width() - full.width(),
                                (scaled.height() - full.height()) // 2, full.width(), full.height()))
-            fade = QLinearGradient(0, 0, self.width(), 0)
-            fade.setColorAt(0, base)
-            fade.setColorAt(.49, QColor(base.red(), base.green(), base.blue(), 247))
-            fade.setColorAt(1, QColor(base.red(), base.green(), base.blue(), 55))
-            painter.fillRect(full, fade)
-        else:
-            # A relay signal, deliberately asymmetrical; no dependence on game art.
-            cx, cy = self.width() * .84, self.height() * .48
-            for index, radius in enumerate((58, 102, 146, 190, 234)):
-                tone = QColor(accent)
-                tone.setAlpha(90 - index * 15)
-                painter.setPen(QPen(tone, 1.5))
-                painter.drawArc(QRectF(cx-radius, cy-radius, radius*2, radius*2), 35*16, 285*16)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(accent)
-            painter.drawEllipse(QRectF(cx-6, cy-6, 12, 12))
+        fade = QLinearGradient(0, 0, self.width(), 0)
+        fade.setColorAt(0, QColor(10, 13, 15, 225))
+        fade.setColorAt(.43, QColor(10, 13, 15, 120))
+        fade.setColorAt(.78, QColor(10, 13, 15, 8))
+        fade.setColorAt(1, QColor(10, 13, 15, 0))
+        painter.fillRect(full, fade)
+        bottom = QLinearGradient(0, self.height() * .55, 0, self.height())
+        bottom.setColorAt(0, QColor(10, 13, 15, 0))
+        bottom.setColorAt(1, QColor(10, 13, 15, 230))
+        painter.fillRect(full, bottom)
         painter.end()
 
 
@@ -167,7 +161,7 @@ class Launcher(QMainWindow):
         super().__init__()
         self.theme = theme or ThemeManager(QApplication.instance(), b.load_config().get("theme", "system"))
         self.setWindowTitle("Relay — BO2 Zombies")
-        self.resize(1020, 700)
+        self.resize(1180, 790)
         self.setMinimumSize(760, 560)
         self.worker = None
         self.server_worker = None
@@ -183,13 +177,18 @@ class Launcher(QMainWindow):
         self.setWindowIcon(QIcon(str(ICON)))
         root = QWidget(objectName="root")
         self.setCentralWidget(root)
-        outer = QVBoxLayout(root)
-        outer.setContentsMargins(26, 14, 26, 16)
-        outer.setSpacing(12)
-        outer.addWidget(self.topbar())
-        outer.addWidget(rule())
+        outer = QHBoxLayout(root)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self.sidebar = self.make_sidebar()
+        outer.addWidget(self.sidebar)
+        workspace = QWidget(objectName="workspace")
+        workspace_layout = QVBoxLayout(workspace)
+        workspace_layout.setContentsMargins(24, 20, 24, 16)
+        workspace_layout.setSpacing(0)
         self.pages = QStackedWidget()
-        outer.addWidget(self.pages, 1)
+        workspace_layout.addWidget(self.pages)
+        outer.addWidget(workspace, 1)
         self.make_home()
         self.make_settings()
         self.make_activity()
@@ -210,83 +209,203 @@ class Launcher(QMainWindow):
         QShortcut(QKeySequence("Ctrl+,"), self, activated=lambda: self.goto(1))
         QShortcut(QKeySequence("Escape"), self, activated=lambda: self.goto(0))
         self.fetcher.fetch("poster")
-        self.fetcher.fetch("hero")
-        self.theme.changed.connect(self.update)
+        if b.load_config().get("background_source") == "steam":
+            self.fetcher.fetch("hero")
+        self.theme.changed.connect(self.update_navigation_icons)
+        self.update_navigation_icons()
+        self.update_sidebar()
+        self.refresh_mode_badge()
         self.game_timer = QTimer(self)
         self.game_timer.setInterval(3500)
         self.game_timer.timeout.connect(self.check_game)
         self.game_timer.start()
 
-    def topbar(self):
-        line = QWidget()
-        row = QHBoxLayout(line)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(7)
-        mark = QLabel()
-        mark.setPixmap(QIcon(str(ICON)).pixmap(34, 34))
-        mark.setAccessibleName("Relay")
-        row.addWidget(mark)
-        row.addSpacing(4)
-        row.addWidget(label("Relay", "brand"))
-        row.addStretch()
-        for idx, text in ((0, "Jugar"), (3, "Servidores"), (1, "Configuración"), (2, "Actividad")):
+    def make_sidebar(self):
+        rail = QFrame(objectName="sidebar")
+        rail.setFixedWidth(196)
+        layout = QVBoxLayout(rail)
+        layout.setContentsMargins(14, 22, 14, 18)
+        layout.setSpacing(8)
+        branding = QHBoxLayout()
+        branding.setSpacing(10)
+        self.brand_mark = QLabel()
+        self.brand_mark.setPixmap(QIcon(str(ICON)).pixmap(34, 34))
+        self.brand_mark.setFixedSize(34, 34)
+        self.brand_mark.setAccessibleName("Relay")
+        branding.addWidget(self.brand_mark)
+        self.brand_name = label("Relay", "brand")
+        branding.addWidget(self.brand_name)
+        branding.addStretch()
+        layout.addLayout(branding)
+        layout.addSpacing(28)
+        for idx, text, symbol in ((0, "Biblioteca", "library"), (3, "Servidores", "servers"),
+                                  (2, "Actividad", "activity"), (1, "Configuración", "settings")):
             tab = button(text, lambda _=False, n=idx: self.goto(n), "tab")
+            tab.setIconSize(QSize(20, 20))
+            tab.setMinimumHeight(42)
+            tab.setProperty("navTitle", text)
+            tab.setProperty("navIcon", symbol)
+            tab.setToolTip(text)
+            tab.setAccessibleName(text)
             self.tabs.append((idx, tab))
-            row.addWidget(tab)
-        return line
+            layout.addWidget(tab)
+        layout.addSpacing(26)
+        self.library_label = label("Tu juego", "caption")
+        layout.addWidget(self.library_label)
+        self.library_game = button("Black Ops II\nZombies", lambda: self.goto(0), "libraryGame")
+        thumbnail = QPixmap(str(artwork.BUNDLED_HERO))
+        if not thumbnail.isNull():
+            thumbnail = thumbnail.scaled(116, 46, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                         Qt.TransformationMode.SmoothTransformation)
+            self.library_game.setIcon(QIcon(thumbnail.copy(thumbnail.width() - 38, 0, 38, 46)))
+        self.library_game.setIconSize(QSize(38, 46))
+        self.library_game.setToolTip("Black Ops II Zombies")
+        self.library_game.setAccessibleName("Black Ops II Zombies")
+        layout.addWidget(self.library_game)
+        layout.addStretch()
+        self.sidebar_note = label("Tu próxima ronda.\nA tu manera.", "hint")
+        layout.addWidget(self.sidebar_note)
+        layout.addSpacing(10)
+        self.sidebar_version = label("Relay " + __version__, "caption")
+        layout.addWidget(self.sidebar_version)
+        return rail
+
+    def update_sidebar(self):
+        if not hasattr(self, "sidebar"):
+            return
+        compact = self.width() < 1000
+        self.sidebar.setFixedWidth(72 if compact else 196)
+        for _, tab in self.tabs:
+            tab.setText("" if compact else tab.property("navTitle"))
+            tab.setProperty("compact", compact)
+            tab.style().unpolish(tab)
+            tab.style().polish(tab)
+        for widget in (self.brand_name, self.library_label, self.library_game,
+                       self.sidebar_note, self.sidebar_version):
+            widget.setVisible(not compact)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_sidebar()
+
+    def update_navigation_icons(self):
+        palette = self.palette()
+        for idx, tab in self.tabs:
+            active = idx == self.pages.currentIndex()
+            tone = palette.color(QPalette.ColorRole.WindowText if active else QPalette.ColorRole.PlaceholderText).name()
+            tab.setIcon(icon(tab.property("navIcon"), tone))
+        if hasattr(self, "folder_button"):
+            tone = palette.color(QPalette.ColorRole.WindowText).name()
+            self.folder_button.setIcon(icon("folder", tone))
+            self.drive_button.setIcon(icon("download", tone))
+        self.update()
 
     def make_home(self):
         page = QWidget(objectName="page")
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(18)
+        lay.setSpacing(14)
+        header = QHBoxLayout()
+        header.addWidget(label("Biblioteca", "pageTitle"))
+        header.addStretch()
+        self.mode_badge = label("Modo online", "modeBadge")
+        self.mode_badge.setToolTip("Modo de inicio seleccionado. La cuenta se autentica en Plutonium.")
+        header.addWidget(self.mode_badge)
+        lay.addLayout(header)
+
         hero = HomeBackdrop()
         self.home_background = hero
-        bg_custom = b.load_config().get("background_image")
-        if isinstance(bg_custom, str) and bg_custom and not QPixmap(bg_custom).isNull():
-            hero.load(bg_custom)
         content = QVBoxLayout(hero)
-        content.setContentsMargins(26, 24, 26, 24)
-        content.setSpacing(2)
-        content.addStretch()
-        content.addWidget(label("Black Ops II", "gameSubtitle"))
-        content.addWidget(label("Zombies", "heroTitle"))
+        content.setContentsMargins(28, 18, 28, 15)
+        content.setSpacing(0)
+        content.addStretch(2)
+        content.addWidget(label("CALL OF DUTY", "franchiseTitle"))
+        self.game_title = label('BLACK OPS <span style="color:#f2a154">II</span>', "gameTitle")
+        font = self.game_title.font()
+        font.setStretch(75)
+        font.setBold(True)
+        self.game_title.setFont(font)
+        content.addWidget(self.game_title)
+        content.addWidget(label("Z O M B I E S", "zombiesTitle"))
         content.addSpacing(10)
-        content.addWidget(label("Tu próxima ronda empieza aquí.", "heroNote"))
-        content.addStretch()
+        content.addWidget(label("Sobrevive una ronda más.", "heroNote"))
+        content.addSpacing(20)
+        controls = QHBoxLayout()
+        controls.setSpacing(10)
+        self.play = button("Jugar Zombies", self.play_or_setup, "launchGame")
+        self.play.setIcon(icon("play", "#21180f"))
+        self.play.setIconSize(QSize(21, 21))
+        self.play.setMinimumWidth(202)
+        controls.addWidget(self.play)
+        self.hero_settings = button("", lambda: self.goto(1), "heroSettings")
+        self.hero_settings.setIcon(icon("settings", "#f4eee7"))
+        self.hero_settings.setIconSize(QSize(23, 23))
+        self.hero_settings.setFixedSize(50, 50)
+        self.hero_settings.setToolTip("Configurar el juego")
+        self.hero_settings.setAccessibleName("Configurar el juego")
+        controls.addWidget(self.hero_settings)
+        controls.addStretch()
+        content.addLayout(controls)
+        content.addStretch(1)
+        content.addSpacing(14)
+        status = QHBoxLayout()
+        status.setSpacing(10)
+        self.status_marker = label("●", "statusMarker")
+        self.status_marker.setFixedWidth(10)
+        status.addWidget(self.status_marker, 0, Qt.AlignmentFlag.AlignTop)
+        status_text = QVBoxLayout()
+        status_text.setSpacing(4)
+        self.game_state = label("Comprobando…", "heroState", True)
+        self.game_detail = label("", "heroDetail", True)
+        self.game_detail.setMinimumWidth(380)
+        self.game_detail.setMaximumWidth(440)
+        status_text.addWidget(self.game_state)
+        status_text.addWidget(self.game_detail)
+        status.addLayout(status_text)
+        status.addStretch(1)
+        content.addLayout(status)
         lay.addWidget(hero, 1)
 
-        status = QFrame(objectName="homeStatus")
-        row = QHBoxLayout(status)
-        row.setContentsMargins(22, 22, 22, 22)
-        row.setSpacing(22)
-        text = QVBoxLayout()
-        text.setSpacing(7)
-        self.game_state = label("Comprobando…", "rowTitle", True)
-        self.game_detail = label("", "hint", True)
-        text.addWidget(self.game_state)
-        text.addWidget(self.game_detail)
-        row.addLayout(text, 1)
-        self.play = button("Jugar", self.play_or_setup, "play")
-        self.play.setMinimumWidth(180)
-        row.addWidget(self.play)
-        lay.addWidget(status)
-
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
-        actions.addWidget(button("Carpeta del juego", self.browse))
-        self.drive_button = button("Archivos en Drive", self.open_game_files)
-        self.drive_button.setToolTip("Abrir la carpeta compartida del juego en tu navegador")
-        actions.addWidget(self.drive_button)
-        actions.addStretch()
-        actions.addWidget(button("Cambiar fondo", self.change_background, "link"))
-        lay.addLayout(actions)
+        quick = QHBoxLayout()
+        quick.setSpacing(12)
+        servers = QFrame(objectName="quickPanel")
+        sl = QVBoxLayout(servers)
+        sl.setContentsMargins(17, 14, 17, 12)
+        sl.setSpacing(7)
+        sl.addWidget(label("La siguiente partida", "rowTitle"))
+        sl.addWidget(label("Busca mapas y servidores de Zombies.", "hint", True))
+        self.servers_button = button("Explorar servidores", self.open_servers, "quickLink")
+        sl.addWidget(self.servers_button, 0, Qt.AlignmentFlag.AlignLeft)
+        quick.addWidget(servers, 1)
+        files = QFrame(objectName="quickPanel")
+        fl = QVBoxLayout(files)
+        fl.setContentsMargins(17, 14, 17, 12)
+        fl.setSpacing(7)
+        fl.addWidget(label("Archivos del juego", "rowTitle"))
+        fl.addWidget(label("Selecciona tu carpeta o descárgala.", "hint", True))
+        file_actions = QHBoxLayout()
+        file_actions.setSpacing(6)
+        self.folder_button = button("Carpeta", self.browse, "quickLink")
+        self.folder_button.setToolTip("Seleccionar la carpeta del juego")
+        self.folder_button.setAccessibleName("Seleccionar la carpeta del juego")
+        file_actions.addWidget(self.folder_button)
+        self.drive_button = button("Drive", self.open_game_files, "quickLink")
+        self.drive_button.setToolTip("Abrir la carpeta compartida del juego")
+        self.drive_button.setAccessibleName("Abrir archivos del juego en Drive")
+        file_actions.addWidget(self.drive_button)
+        file_actions.addStretch()
+        fl.addLayout(file_actions)
+        quick.addWidget(files, 1)
+        lay.addLayout(quick)
         footer = QHBoxLayout()
-        footer.addWidget(label("Hecho para tu escritorio.", "caption"))
+        footer.addWidget(label("Plutonium  /  " + ("Windows" if b.IS_WINDOWS else "Linux"), "caption"))
         footer.addStretch()
-        footer.addWidget(label(("Windows" if b.IS_WINDOWS else "Linux") + "  /  " + __version__, "caption"))
+        footer.addWidget(button("Cambiar banner", self.change_background, "link"))
         lay.addLayout(footer)
         self.pages.addWidget(page)
+
+    def refresh_mode_badge(self):
+        self.mode_badge.setText("Modo LAN" if self.lan.isChecked() else "Modo online")
 
     def open_game_files(self):
         QDesktopServices.openUrl(QUrl(GAME_FILES_URL))
@@ -380,6 +499,7 @@ class Launcher(QMainWindow):
         self.lan = QCheckBox("Modo LAN / sin conexión (no permite servidores públicos)")
         self.lan.setChecked(bool(b.load_config().get("lan_mode", False)))
         self.lan.toggled.connect(lambda enabled: b.save_config(lan_mode=enabled))
+        self.lan.toggled.connect(self.refresh_mode_badge)
         e.addWidget(self.lan)
         e.addWidget(label("Online: Jugar utiliza el acceso oficial a Zombies con cuenta autenticada. "
                           "LAN: inicia el motor directamente sin abrir el cliente de sesión. "
@@ -418,7 +538,7 @@ class Launcher(QMainWindow):
         e.addWidget(self.advanced_panel)
         lay.addWidget(engine)
 
-        art, a = self.setting_group("Arte del juego", "Se utiliza arte oficial descargado desde Steam o una imagen local elegida por ti.")
+        art, a = self.setting_group("Imágenes del juego", "Portada de Steam y banner original de Relay. También puedes usar tus propias imágenes.")
         self.cover = Artwork("poster")
         self.cover.setFixedSize(140, 180)
         self.cover.setMinimumWidth(140)
@@ -432,10 +552,11 @@ class Launcher(QMainWindow):
         art_buttons.addWidget(button("SteamGridDB", lambda: QDesktopServices.openUrl(QUrl("https://www.steamgriddb.com/game/2077"))))
         art_buttons.addStretch()
         a.addLayout(art_buttons)
-        a.addWidget(label("Fondo de inicio", "rowTitle"))
+        a.addWidget(label("Banner de inicio", "rowTitle"))
         bg_buttons = QHBoxLayout()
-        bg_buttons.addWidget(button("Elegir fondo", self.change_background))
-        bg_buttons.addWidget(button("Restaurar fondo de BO2", self.reset_background))
+        bg_buttons.addWidget(button("Elegir banner", self.change_background))
+        bg_buttons.addWidget(button("Banner de Relay", self.reset_background))
+        bg_buttons.addWidget(button("Arte de Steam", self.use_steam_background))
         bg_buttons.addStretch()
         a.addLayout(bg_buttons)
         lay.addWidget(art)
@@ -733,13 +854,14 @@ class Launcher(QMainWindow):
             w.setObjectName("tabActive" if page_idx == idx else "tab")
             w.style().unpolish(w)
             w.style().polish(w)
+        self.update_navigation_icons()
         if idx == 1:
             self.refresh()
         if idx == 3 and not self.server_rows:
             self.refresh_servers()
 
     def art_received(self, kind: str, path: str):
-        if kind == "hero" and not b.load_config().get("background_image"):
+        if kind == "hero" and b.load_config().get("background_source") == "steam" and not b.load_config().get("background_image"):
             self.home_background.load(path)
         elif kind == "poster" and not b.load_config().get("cover_image"):
             self.cover.load(path)
@@ -784,6 +906,9 @@ class Launcher(QMainWindow):
             self.play.setText("Iniciando…")
         if game and not self.path.isModified():
             self.path.setText(str(game))
+        self.status_marker.setProperty("ready", ready or playing)
+        self.status_marker.style().unpolish(self.status_marker)
+        self.status_marker.style().polish(self.status_marker)
         return ready
 
     def browse(self):
@@ -833,20 +958,23 @@ class Launcher(QMainWindow):
         self.path_status.setText(messages.get(state, "Ruta de BO2 por comprobar"))
 
     def change_background(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Elegir fondo del launcher", str(Path.home()), "Imágenes (*.png *.jpg *.jpeg *.webp)")
+        path, _ = QFileDialog.getOpenFileName(self, "Elegir banner del launcher", str(Path.home()), "Imágenes (*.png *.jpg *.jpeg *.webp)")
         if not path:
             return
         if QPixmap(path).isNull():
-            QMessageBox.warning(self, "Imagen no válida", "No se pudo abrir ese fondo.")
+            QMessageBox.warning(self, "Imagen no válida", "No se pudo abrir ese banner.")
             return
-        b.save_config(background_image=path)
+        b.save_config(background_image=path, background_source="custom")
         self.home_background.load(path)
 
     def reset_background(self):
-        b.save_config(background_image="")
-        self.home_background.load(artwork.cached_image("hero"))
-        if artwork.cached_image("hero") is None:
-            self.fetcher.fetch("hero")
+        b.save_config(background_image="", background_source="relay")
+        self.home_background.load(artwork.home_image())
+
+    def use_steam_background(self):
+        b.save_config(background_image="", background_source="steam")
+        self.home_background.load(artwork.home_image())
+        self.fetcher.fetch("hero")
 
     def change_art(self):
         path, _ = QFileDialog.getOpenFileName(self, "Elegir imagen del juego", str(Path.home()), "Imágenes (*.png *.jpg *.jpeg *.webp)")

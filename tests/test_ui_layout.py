@@ -65,6 +65,50 @@ class TestDesktopUI(unittest.TestCase):
                 self.assertTrue(self.window.rect().contains(top))
                 self.assertTrue(self.window.rect().contains(bottom))
 
+    def test_sidebar_collapses_and_restores_navigation_labels(self):
+        self.window.resize(760, 560)
+        self.app.processEvents()
+        self.assertEqual(self.window.sidebar.width(), 72)
+        for _, tab in self.window.tabs:
+            self.assertEqual(tab.text(), '')
+            self.assertTrue(tab.accessibleName())
+            self.assertFalse(tab.icon().isNull())
+        self.window.resize(1180, 790)
+        self.app.processEvents()
+        self.assertEqual(self.window.sidebar.width(), 196)
+        self.assertTrue(all(tab.text() for _, tab in self.window.tabs))
+
+    def test_banner_is_available_without_network_or_steam(self):
+        self.assertFalse(self.window.home_background.pix.isNull())
+        self.assertEqual(artwork.home_image({}), artwork.BUNDLED_HERO)
+        self.assertEqual(artwork.home_image({'background_image': '/missing/banner.png'}), artwork.BUNDLED_HERO)
+
+    def test_custom_banner_survives_steam_response_and_can_reset(self):
+        from PySide6.QtGui import QPixmap
+        custom = QPixmap(30, 20)
+        custom.fill('#793cc2')
+        image = self.root / 'custom.png'
+        custom.save(str(image))
+        b.save_config(background_image=str(image), background_source='custom')
+        self.window.home_background.load(artwork.home_image())
+        self.window.art_received('hero', str(artwork.BUNDLED_HERO))
+        self.assertEqual(self.window.home_background.pix.size(), custom.size())
+        self.window.reset_background()
+        self.assertEqual(b.load_config()['background_source'], 'relay')
+        self.assertEqual(self.window.home_background.pix.size(), QPixmap(str(artwork.BUNDLED_HERO)).size())
+
+    def test_mode_badge_follows_lan_setting(self):
+        self.window.lan.setChecked(True)
+        self.assertEqual(self.window.mode_badge.text(), 'Modo LAN')
+        self.window.lan.setChecked(False)
+        self.assertEqual(self.window.mode_badge.text(), 'Modo online')
+
+    def test_server_shortcut_opens_server_page(self):
+        with mock.patch.object(self.window, 'refresh_servers') as refresh:
+            QTest.mouseClick(self.window.servers_button, Qt.MouseButton.LeftButton)
+        self.assertEqual(self.window.pages.currentIndex(), 3)
+        refresh.assert_called_once()
+
     def test_drive_opens_exact_shared_folder(self):
         with mock.patch('bo2launcher.gui.QDesktopServices.openUrl') as open_url:
             QTest.mouseClick(self.window.drive_button, Qt.MouseButton.LeftButton)

@@ -43,7 +43,15 @@ al portapapeles e inicia Zombies: pega ese comando en la consola del juego.
 **Sistema** sigue la paleta que Qt recibe del escritorio. **Claro** y **Oscuro**
 son opciones manuales persistentes. Se mantienen las decoraciones de ventana
 y la fuente del sistema. `Ctrl+,` abre Configuración; `Esc` vuelve a Jugar.
-Puedes cambiar tanto la portada como el fondo desde Configuración.
+La barra lateral se convierte en iconos en ventanas pequeñas; cada icono
+mantiene su nombre accesible y ayuda al pasar el cursor.
+
+El banner de Zombies viene incluido y funciona sin conexión. En
+**Configuración → Imágenes del juego** puedes elegir una imagen propia,
+restaurar **Banner de Relay** o seleccionar **Arte de Steam**. El arte de
+Steam se descarga a la caché personal y nunca reemplaza una imagen propia.
+El [banner incluido](banner-prompt.md) es una ilustración original de comunidad
+inspirada en TranZit; no es una captura oficial del juego.
 
 | Datos | Linux | Windows |
 | --- | --- | --- |

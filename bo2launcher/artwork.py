@@ -1,8 +1,9 @@
-"""Official Steam art cache. Downloads happen on the player's machine, never bundled.
+"""Optional Steam artwork cache and Relay's bundled original Zombies fan art.
 
 All endpoints are fixed public Steam art endpoints for BO2 app 202970 and Zombies 212910.
 Images are cached outside the source tree for local use; artwork copyright is
-retained by its owners. The source repository redistributes no game artwork.
+retained by its owners. The bundled banner is original generated fan art,
+not an official screenshot or a redistributed Steam asset.
 """
 from __future__ import annotations
 import os
@@ -11,6 +12,21 @@ from . import backend as b
 from PySide6.QtCore import QObject, Signal, QUrl
 from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
+
+BUNDLED_HERO = Path(__file__).parent / "assets/zombies-tranzit-banner.png"
+
+
+def home_image(config: dict | None = None) -> Path | None:
+    """Custom image first, explicit Steam selection second, bundled fan art by default."""
+    config = b.load_config() if config is None else config
+    custom = config.get("background_image")
+    if isinstance(custom, str) and custom and Path(custom).is_file() and not QPixmap(custom).isNull():
+        return Path(custom)
+    if config.get("background_source") == "steam":
+        steam = cached_image("hero")
+        if steam:
+            return steam
+    return BUNDLED_HERO if BUNDLED_HERO.is_file() else None
 
 ART_BASE = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/212910/"
 SOURCES = {
