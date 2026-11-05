@@ -1,3 +1,11 @@
-# Relay
+## Instalación 
 
-BO2 Zombies + Plutonium for Linux and Windows.
+
+```bash
+cd ~/Projects/BO2-Plutonium-Linux
+./instalar.sh
+bo2-launcher
+```
+
+
+
