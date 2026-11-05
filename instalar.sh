@@ -5,7 +5,9 @@ DATA_BASE="${XDG_DATA_HOME:-$HOME/.local/share}"
 APP_DIR="$DATA_BASE/bo2-zombies-linux/app"
 BIN_DIR="$HOME/.local/bin"
 APPS_DIR="$DATA_BASE/applications"
+CUSTOM_PREFIX=false
 if [[ "${1:-}" == "--prefix" && -n "${2:-}" && $# -eq 2 ]]; then
+  CUSTOM_PREFIX=true
   APP_DIR="$2/share/relay/app"
   BIN_DIR="$2/bin"
   APPS_DIR="$2/share/applications"
@@ -19,6 +21,13 @@ if [[ "$APP_DIR" != /* ]]; then
 fi
 command -v python3 >/dev/null || { echo 'Instala Python 3.12 o posterior.' >&2; exit 1; }
 mkdir -p "$APP_DIR/bo2launcher" "$BIN_DIR" "$APPS_DIR"
+for destination in "$APP_DIR" "$APP_DIR/bo2launcher" "$BIN_DIR" "$APPS_DIR"; do
+  if [[ ! -w "$destination" ]]; then
+    echo "No se puede escribir en: $destination" >&2
+    echo 'Ejecuta el instalador desde tu terminal o usa --prefix con una ruta donde puedas escribir.' >&2
+    exit 1
+  fi
+done
 cp -a "$ROOT/bo2launcher/." "$APP_DIR/bo2launcher/"
 cp "$ROOT/requirements.txt" "$ROOT/start.py" "$APP_DIR/"
 python3 "$APP_DIR/start.py" --install-only
@@ -51,6 +60,11 @@ PY
 if command -v update-desktop-database >/dev/null; then
   update-desktop-database "$APPS_DIR" || true
 fi
-echo 'Relay instalado. Ábrelo desde el menú de aplicaciones.'
+if "$CUSTOM_PREFIX"; then
+  echo "Relay instalado en: $APP_DIR"
+  echo "Acceso de escritorio: $APPS_DIR/bo2-launcher.desktop"
+else
+  echo 'Relay instalado. Ábrelo desde el menú de aplicaciones.'
+fi
 echo "También puedes ejecutar: $BIN_DIR/relay-launcher"
 echo 'Tu configuración, Wine y archivos del juego se conservaron.'
