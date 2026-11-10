@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, Qt, QPointF, QAbstractAnimation
 from PySide6.QtGui import QCloseEvent, QPalette
 from PySide6.QtWidgets import QApplication, QPushButton, QScrollArea
 from PySide6.QtTest import QTest
@@ -57,7 +57,8 @@ class TestDesktopUI(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(self.window.width(), 760)
         self.assertEqual(self.window.height(), 560)
-        for control in [self.window.play, self.window.drive_button] + [tab for _, tab in self.window.tabs]:
+        for control in [self.window.play, self.window.drive_button, self.window.folder_button,
+                        self.window.servers_button, *self.window.scene_tiles] + [tab for _, tab in self.window.tabs]:
             with self.subTest(text=control.text()):
                 self.assertTrue(control.isVisible())
                 top = control.mapTo(self.window, control.rect().topLeft())
@@ -65,18 +66,74 @@ class TestDesktopUI(unittest.TestCase):
                 self.assertTrue(self.window.rect().contains(top))
                 self.assertTrue(self.window.rect().contains(bottom))
 
-    def test_sidebar_collapses_and_restores_navigation_labels(self):
+    def test_navigation_collapses_and_restores_labels(self):
         self.window.resize(760, 560)
         self.app.processEvents()
-        self.assertEqual(self.window.sidebar.width(), 72)
         for _, tab in self.window.tabs:
             self.assertEqual(tab.text(), '')
             self.assertTrue(tab.accessibleName())
             self.assertFalse(tab.icon().isNull())
         self.window.resize(1180, 790)
         self.app.processEvents()
-        self.assertEqual(self.window.sidebar.width(), 196)
         self.assertTrue(all(tab.text() for _, tab in self.window.tabs))
+
+    def test_gallery_switches_only_art_and_persists_after_reopening(self):
+        with mock.patch.object(self.window, 'start_game') as launch:
+            tile = self.window.scene_tiles[1]
+            tile.setFocus()
+            QTest.keyClick(tile, Qt.Key.Key_Space)
+        launch.assert_not_called()
+        self.assertEqual(b.load_config()['scene'], 'mob')
+        self.assertEqual(artwork.home_image(), artwork.SCENES[1].path)
+        self.assertEqual(sum(t.isChecked() for t in self.window.scene_tiles), 1)
+        self.assertIn('Alcatraz', self.window.scene_caption.text())
+        other = Launcher(self.theme)
+        try:
+            self.assertTrue(other.scene_tiles[1].isChecked())
+            self.assertEqual(other.home_background.pix.toImage(), self.window.home_background.pix.toImage())
+        finally:
+            other.close()
+            other.deleteLater()
+
+    def test_invalid_scene_falls_back_and_every_packaged_image_decodes(self):
+        from PySide6.QtGui import QPixmap
+        self.assertEqual(artwork.home_image({'scene': '../../outside'}), artwork.BUNDLED_HERO)
+        for scene in artwork.SCENES:
+            pix = QPixmap(str(scene.path))
+            self.assertGreaterEqual(pix.width(), 1600)
+            self.assertGreaterEqual(pix.height(), 900)
+
+    def test_depth_settles_stops_on_hide_and_respects_reduced_motion(self):
+        with mock.patch.object(QApplication, 'isEffectEnabled', return_value=True):
+            self.window.apply_motion_preference()
+            widgets = [self.window.home_background, *self.window.scene_tiles]
+            for widget in widgets:
+                widget.move_depth(QPointF(.7, -.4))
+            QTest.qWait(260)
+            for widget in widgets:
+                self.assertEqual(widget.motion.state(), QAbstractAnimation.State.Stopped)
+                self.assertEqual(widget.offset, QPointF(.7, -.4))
+            cached = self.window.home_background.scaled.cacheKey()
+            self.window.home_background.move_depth(QPointF(-.2, .1))
+            self.window.reduce_motion.setChecked(True)
+            for widget in widgets:
+                self.assertEqual(widget.offset, QPointF())
+                self.assertFalse(widget.motion_enabled)
+                widget.move_depth(QPointF(1, 1))
+                self.assertEqual(widget.motion.state(), QAbstractAnimation.State.Stopped)
+            self.assertEqual(self.window.home_background.scaled.cacheKey(), cached)
+            self.assertTrue(b.load_config()['reduced_motion'])
+            self.window.reduce_motion.setChecked(False)
+            self.window.home_background.move_depth(QPointF(1, 1))
+            self.window.goto(1)
+            self.assertEqual(self.window.home_background.motion.state(), QAbstractAnimation.State.Stopped)
+            self.assertEqual(self.window.home_background.offset, QPointF())
+
+    def test_desktop_disabled_animations_are_respected(self):
+        with mock.patch.object(QApplication, 'isEffectEnabled', return_value=False):
+            self.window.apply_motion_preference()
+        self.assertFalse(self.window.home_background.motion_enabled)
+        self.assertTrue(all(not t.motion_enabled for t in self.window.scene_tiles))
 
     def test_banner_is_available_without_network_or_steam(self):
         self.assertFalse(self.window.home_background.pix.isNull())

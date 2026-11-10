@@ -1,23 +1,47 @@
-"""Optional Steam artwork cache and Relay's bundled original Zombies fan art.
-
-All endpoints are fixed public Steam art endpoints for BO2 app 202970 and Zombies 212910.
-Images are cached outside the source tree for local use; artwork copyright is
-retained by its owners. The bundled banner is original generated fan art,
-not an official screenshot or a redistributed Steam asset.
-"""
+"""Real Zombies imagery with provenance; optional Steam cache and personal images."""
 from __future__ import annotations
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from . import backend as b
 from PySide6.QtCore import QObject, Signal, QUrl
 from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
-BUNDLED_HERO = Path(__file__).parent / "assets/zombies-tranzit-banner.png"
+ASSETS = Path(__file__).parent / "assets"
+
+
+@dataclass(frozen=True)
+class Scene:
+    key: str
+    title: str
+    location: str
+    filename: str
+
+    @property
+    def path(self) -> Path:
+        return ASSETS / self.filename
+
+    @property
+    def source(self) -> str:
+        return ('https://github.com/PlagueFPS/cod-zombies/blob/'
+                '6f37bbde7ca51f52aa85d2fbc0b63e2b43885127/public/maps/' + self.filename)
+
+
+SCENES = (
+    Scene('tranzit', 'TranZit', 'Green Run', 'tranzit.webp'),
+    Scene('mob', 'Mob of the Dead', 'Alcatraz', 'mob-of-the-dead.webp'),
+    Scene('buried', 'Buried', 'Resolution 1295', 'buried.webp'),
+)
+BUNDLED_HERO = SCENES[0].path
+
+
+def selected_scene(config: dict) -> Scene:
+    return next((s for s in SCENES if s.key == config.get('scene')), SCENES[0])
 
 
 def home_image(config: dict | None = None) -> Path | None:
-    """Custom image first, explicit Steam selection second, bundled fan art by default."""
+    """Custom image first, explicit Steam selection second, real Zombies scene by default."""
     config = b.load_config() if config is None else config
     custom = config.get("background_image")
     if isinstance(custom, str) and custom and Path(custom).is_file() and not QPixmap(custom).isNull():
@@ -26,7 +50,8 @@ def home_image(config: dict | None = None) -> Path | None:
         steam = cached_image("hero")
         if steam:
             return steam
-    return BUNDLED_HERO if BUNDLED_HERO.is_file() else None
+    scene = selected_scene(config).path
+    return scene if scene.is_file() else BUNDLED_HERO if BUNDLED_HERO.is_file() else None
 
 ART_BASE = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/212910/"
 SOURCES = {

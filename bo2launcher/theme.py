@@ -8,17 +8,17 @@ def palette_for(mode: str, system: QPalette) -> QPalette:
         return QPalette(system)
     dark = mode == "dark"
     colors = {
-        "Window": "#181d22" if dark else "#f3f5f7",
+        "Window": "#202329" if dark else "#f3f5f7",
         "WindowText": "#e7eef2" if dark else "#24313c",
-        "Base": "#14191e" if dark else "#ffffff",
-        "AlternateBase": "#20272e" if dark else "#eaf0f4",
+        "Base": "#1b1e24" if dark else "#ffffff",
+        "AlternateBase": "#30353d" if dark else "#eaf0f4",
         "Text": "#e7eef2" if dark else "#24313c",
-        "Button": "#20272e" if dark else "#ffffff",
+        "Button": "#30353d" if dark else "#ffffff",
         "ButtonText": "#e7eef2" if dark else "#24313c",
         "Highlight": "#82bccf" if dark else "#326c87",
         "HighlightedText": "#17232c" if dark else "#ffffff",
         "Link": "#82bccf" if dark else "#326c87",
-        "PlaceholderText": "#a5b3bf" if dark else "#586977",
+        "PlaceholderText": "#bac1cb" if dark else "#586977",
         "ToolTipBase": "#2b353e" if dark else "#ffffff",
         "ToolTipText": "#e7eef2" if dark else "#24313c",
         "Mid": "#35414c" if dark else "#ced8df",
@@ -41,18 +41,19 @@ def stylesheet(palette: QPalette) -> str:
     border = color("Mid")
     return f"""
     QMainWindow, QWidget#root, QWidget#page, QWidget#workspace {{ background: {window}; color: {text}; }}
-    QFrame#sidebar {{ background: {base}; border-right: 1px solid {border}; }}
+    QFrame#navigation {{ background: {window}; }}
     QLabel {{ background: transparent; color: {text}; }}
-    QLabel#brand {{ font-size: 24px; font-weight: 700; }}
+    QLabel#brand {{ font-size: 22px; font-weight: 700; }}
     QLabel#heading {{ font-size: 28px; font-weight: 700; }}
     QLabel#pageTitle {{ font-size: 21px; font-weight: 650; }}
     QLabel#franchiseTitle {{ font-size: 17px; font-weight: 750; color: #f4f0e9; }}
-    QLabel#gameTitle {{ font-size: 52px; font-weight: 800; color: #ffffff; }}
-    QLabel#zombiesTitle {{ font-size: 21px; font-weight: 650; color: #e4c6a9; }}
+    QLabel#gameTitle {{ font-size: 62px; font-weight: 800; color: #ffffff; }}
+    QLabel#zombiesTitle {{ font-size: 22px; font-weight: 650; color: #e7dfd4; }}
+    QLabel#sceneCaption {{ font-size: 12px; color: #e1e6ea; }}
     QLabel#heroNote {{ font-size: 14px; color: #d0c9c0; }}
     QLabel#heroState {{ font-size: 13px; font-weight: 650; color: #f5eee5; }}
     QLabel#heroDetail {{ font-size: 12px; color: #bfc4c5; }}
-    QLabel#statusMarker {{ color: #f2a154; font-size: 11px; }}
+    QLabel#statusMarker {{ color: #f5a34d; font-size: 11px; }}
     QLabel#statusMarker[ready="true"] {{ color: #a9cfac; }}
     QLabel#modeBadge {{ color: {muted}; background: {surface}; border: 1px solid {border};
                        border-radius: 11px; padding: 4px 12px; font-size: 11px; }}
@@ -74,23 +75,23 @@ def stylesheet(palette: QPalette) -> str:
                        font-size: 15px; font-weight: 700; padding: 13px 22px; border-radius: 8px; }}
     QPushButton#play:hover, QPushButton#play:focus {{ border-color: {text}; }}
     QPushButton#play:disabled {{ background: {window}; color: {muted}; border-color: {border}; }}
-    QPushButton#launchGame {{ background: #f2a154; color: #21180f; border: 2px solid #f2a154;
-        border-radius: 6px; font-size: 15px; font-weight: 750; padding: 13px 22px; }}
+    QPushButton#launchGame {{ background: #f5a34d; color: #21180f; border: 2px solid #f5a34d;
+        border-radius: 6px; font-size: 15px; font-weight: 750; padding: 11px 22px; }}
     QPushButton#launchGame:hover {{ background: #ffb56e; border-color: #ffb56e; }}
     QPushButton#launchGame:focus {{ border-color: #fff4e8; }}
     QPushButton#launchGame:pressed {{ background: #d98c43; }}
     QPushButton#launchGame:disabled {{ background: #48413a; color: #c6b9ac; border-color: #655648; }}
     QPushButton#heroSettings {{ background: rgba(24, 27, 28, 160); border: 1px solid #777569;
         border-radius: 6px; padding: 9px; }}
-    QPushButton#heroSettings:hover, QPushButton#heroSettings:focus {{ border: 2px solid #f2a154; padding: 8px; }}
+    QPushButton#heroSettings:hover, QPushButton#heroSettings:focus {{ border: 2px solid #f5a34d; padding: 8px; }}
     QPushButton#quickLink {{ background: transparent; border: 1px solid transparent;
-        padding: 5px 1px; color: {text}; font-size: 12px; text-align: left; }}
+        padding: 6px 9px; color: {text}; font-size: 12px; text-align: left; }}
     QPushButton#quickLink:hover, QPushButton#quickLink:focus {{ border-color: {accent}; }}
-    QPushButton#link {{ background: transparent; border-color: transparent; color: {muted}; padding: 7px 8px; }}
+    QPushButton#link {{ background: transparent; border-color: transparent; color: {muted}; padding: 3px 8px; font-size: 12px; }}
     QPushButton#link:hover, QPushButton#link:focus {{ color: {text}; border-color: {accent}; }}
     QPushButton#tab, QPushButton#tabActive {{ background: transparent; border: 2px solid transparent;
-        border-radius: 6px; padding: 5px 10px; color: {muted}; text-align: left; }}
-    QPushButton#tabActive {{ color: {text}; background: {surface}; border-left-color: {accent}; }}
+        border-radius: 6px; padding: 5px 12px; color: {muted}; text-align: center; }}
+    QPushButton#tabActive {{ color: {text}; background: {surface}; border-bottom-color: {accent}; }}
     QPushButton#tab:hover, QPushButton#tab:focus, QPushButton#tabActive:focus {{ border-color: {accent}; }}
     QPushButton#tab[compact="true"], QPushButton#tabActive[compact="true"] {{ text-align: center; padding: 5px 8px; }}
     QPushButton#libraryGame {{ color: {text}; background: transparent; border: 1px solid {border};

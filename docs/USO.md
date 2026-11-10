@@ -43,15 +43,24 @@ al portapapeles e inicia Zombies: pega ese comando en la consola del juego.
 **Sistema** sigue la paleta que Qt recibe del escritorio. **Claro** y **Oscuro**
 son opciones manuales persistentes. Se mantienen las decoraciones de ventana
 y la fuente del sistema. `Ctrl+,` abre Configuración; `Esc` vuelve a Jugar.
-La barra lateral se convierte en iconos en ventanas pequeñas; cada icono
+La navegación superior se convierte en iconos en ventanas pequeñas; cada icono
 mantiene su nombre accesible y ayuda al pasar el cursor.
 
-El banner de Zombies viene incluido y funciona sin conexión. En
-**Configuración → Imágenes del juego** puedes elegir una imagen propia,
-restaurar **Banner de Relay** o seleccionar **Arte de Steam**. El arte de
-Steam se descarga a la caché personal y nunca reemplaza una imagen propia.
-El [banner incluido](banner-prompt.md) es una ilustración original de comunidad
-inspirada en TranZit; no es una captura oficial del juego.
+Las tres imágenes reales de **TranZit, Mob of the Dead y Buried** vienen
+incluidas y funcionan sin conexión. Elige un ambiente en la galería: se
+recuerda al volver a abrir Relay. Solo cambia la imagen; los mapas se eligen
+dentro de BO2. **Tu imagen** permite elegir un fondo propio y **Créditos**
+muestra su procedencia. [Créditos completos](ARTWORK.md).
+
+El fondo se desplaza suavemente con el cursor y las fotografías inclinan su
+perspectiva. En **Configuración → A tu manera → Reducir movimiento** puedes
+desactivar ambos efectos. También se desactivan si Qt comunica que el
+escritorio tiene las animaciones de interfaz apagadas. No hay un bucle de
+animación permanente; al cambiar de página los efectos se detienen.
+
+En **Configuración → Imágenes del juego** puedes restaurar **Ambiente TranZit**
+o seleccionar **Arte de Steam**. El arte de Steam se descarga a tu caché y
+nunca reemplaza una imagen propia ni el ambiente elegido.
 
 | Datos | Linux | Windows |
 | --- | --- | --- |
