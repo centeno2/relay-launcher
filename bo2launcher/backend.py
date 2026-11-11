@@ -66,6 +66,19 @@ def save_config(**kwargs) -> None:
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(config_path())
 
+GAME_MODES = {"t6zm": "Zombies", "t6mp": "Multijugador"}
+STEAM_APPS = {"t6zm": "212910", "t6mp": "202990"}
+
+
+def selected_game_mode() -> str:
+    mode = load_config().get("game_mode", "t6zm")
+    return mode if isinstance(mode, str) and mode in GAME_MODES else "t6zm"
+
+
+def game_mode_name() -> str:
+    return GAME_MODES[selected_game_mode()]
+
+
 def steam_library_paths() -> list[Path]:
     bases = windows_steam_paths() if IS_WINDOWS else [
         Path.home() / ".steam/steam",
@@ -95,10 +108,12 @@ def is_game_dir(p: Path) -> bool:
     """
     if not p.is_dir() or not (p / "zone").is_dir():
         return False
-    if (p / "t6zm.exe").is_file():
+    mode = selected_game_mode()
+    if (p / (mode + ".exe")).is_file():
         return True
     return all((p / item).is_file() for item in (
-        "binkw32.dll", "localization_zm.txt", "zone/all/zm_transit.ff"
+        "binkw32.dll", "localization_zm.txt" if mode == "t6zm" else "localization_mp.txt",
+        "zone/all/zm_transit.ff" if mode == "t6zm" else "zone/all/mp_la.ff"
     ))
 
 def find_game() -> Path | None:
@@ -107,8 +122,8 @@ def find_game() -> Path | None:
         return Path(cfg)
     for base in steam_library_paths():
         steamapps = base / "steamapps"
-        # Appmanifest_212910 confirma que Steam registró el modo Zombies.
-        manifest = steamapps / "appmanifest_212910.acf"
+        # Steam registers Zombies and Multiplayer separately.
+        manifest = steamapps / ("appmanifest_" + STEAM_APPS[selected_game_mode()] + ".acf")
         if manifest.exists():
             try:
                 content = manifest.read_text(encoding="utf-8", errors="replace")
@@ -283,7 +298,7 @@ def preflight() -> list[tuple[str, bool, str]]:
     if IS_WINDOWS:
         return [
             ("Windows x64", platform.machine().lower() in ("amd64", "x86_64"), "Windows 10/11 x64"),
-            ("Archivos BO2 Zombies", find_game() is not None, "Elige la carpeta del juego"),
+            ("Archivos BO2 " + game_mode_name(), find_game() is not None, "Elige la carpeta del juego"),
             ("Plutonium", PLUTONIUM.is_file(), "Se descarga del servidor oficial"),
             ("Motor T6", bootstrapper_path() is not None, "Actualizar componentes"),
         ]
@@ -297,7 +312,7 @@ def preflight() -> list[tuple[str, bool, str]]:
         except (OSError, subprocess.TimeoutExpired):
             pass
     checks.append(("Vulkan funcional", vulkan_ok, "Revisa vulkan-tools y los controladores gráficos"))
-    checks.append(("Archivos BO2 Zombies", find_game() is not None, "Steam App 212910 o elegir carpeta manualmente"))
+    checks.append(("Archivos BO2 " + game_mode_name(), find_game() is not None, "Instala el modo seleccionado en Steam o elige su carpeta"))
     checks.append(("Wine privado", wine_path() is not None, "Se puede descargar automáticamente"))
     checks.append(("Prefijo privado", (PREFIX / "system.reg").exists(), "Se crea automáticamente"))
     checks.append(("DXVK", (CONFIG / f"dxvk-{DXVK_VER}.installed").exists(), "Se instala automáticamente"))
@@ -547,11 +562,11 @@ def build_online_command(game: Path) -> list[str]:
     if not IS_WINDOWS and (wine is None or not (PREFIX / "system.reg").is_file()):
         raise RuntimeError("Wine todavía no está configurado")
     if not is_game_dir(game):
-        raise RuntimeError("Selecciona una carpeta válida de BO2 Zombies")
+        raise RuntimeError("Selecciona una carpeta válida de BO2 " + game_mode_name())
     launcher = official_game_launcher_path()
     if launcher is None:
         raise RuntimeError("Falta el cliente oficial; abre la sesión oficial para instalarlo")
-    return ([str(wine)] if not IS_WINDOWS else []) + [str(launcher), OFFICIAL_T6ZM_URI]
+    return ([str(wine)] if not IS_WINDOWS else []) + [str(launcher), "plutonium://play/" + selected_game_mode()]
 
 
 def launch_online_game() -> tuple[subprocess.Popen, str]:
@@ -561,12 +576,12 @@ def launch_online_game() -> tuple[subprocess.Popen, str]:
     """
     game = find_game()
     if game is None:
-        raise RuntimeError("Selecciona una carpeta válida de BO2 Zombies")
+        raise RuntimeError("Selecciona una carpeta válida de BO2 " + game_mode_name())
     launcher = official_game_launcher_path()
     if launcher is None:
         return launch_plutonium(), "setup"
     # Plutonium uses its own config.json, not our app's config.json.
-    # Always repair the documented t6Path before asking for T6ZM.
+    # Both BO2 modes use the documented t6Path setting.
     sync_official_game_path(game)
     return _spawn_wine(build_online_command(game), cwd=launcher.parent.parent, logfile="game.log"), "uri"
 
@@ -610,27 +625,19 @@ def backup_online_session() -> list[Path]:
 
 
 def _process_is_t6(cmdline: bytes, comm: bytes = b"") -> bool:
-    """Detect Wine-hosted T6ZM *including the Plutonium bootstrapper process*.
-
-    On Linux the Windows game can run inside plutonium-bootstrapper-win32.exe
-    instead of a standalone t6zm.exe, so checking only t6zm.exe was wrong.
-    Matching `t6zm` explicitly prevents mistaking multiplayer or the updater
-    for a Zombies session. `comm` is truncated to 15 bytes by Linux.
-    """
+    """Detect either BO2 mode so switching cannot start a second game or edit live config."""
     parts = [a.decode("utf-8", "replace").replace("\\", "/").lower()
              for a in cmdline.split(b"\0") if a]
     names = {part.rsplit("/", 1)[-1] for part in parts}
-    direct_names = {"t6zm.exe", "plutonium-t6zm.exe", "plutonium_t6zm.exe"}
-    if names & direct_names:
+    direct_names = {name for mode in GAME_MODES for name in
+                    (mode + ".exe", "plutonium-" + mode + ".exe", "plutonium_" + mode + ".exe")}
+    if names & direct_names or comm.decode("utf-8", "replace").strip().lower() in direct_names:
         return True
-    if comm.decode("utf-8", "replace").strip().lower() in direct_names:
-        return True
-    bootstrap = any("plutonium-bootstrapper-win32.exe" in part for part in parts)
-    return bootstrap and "t6zm" in names and "t6mp" not in names
+    return BOOTSTRAPPER_EXE in names and len(set(parts) & GAME_MODES.keys()) == 1
 
 
 def game_process_alive(proc_root: Path = Path("/proc")) -> bool:
-    """Recognize Zombies processes in our own Wine prefix, not any wineserver.
+    """Recognize BO2 processes in our own Wine prefix, not any wineserver.
 
     Linux exposes Wine processes under different executable names depending on
     the build. Compare cmdline and comm, and require this exact WINEPREFIX.
@@ -751,10 +758,10 @@ def build_game_command(game: Path, *, lan: bool = False, server: str | None = No
             "una vez para descargar el cliente oficial e iniciar sesión."
         )
     if not is_game_dir(game):
-        raise RuntimeError("La carpeta de BO2 Zombies no es válida. Revísala en Configuración.")
+        raise RuntimeError("La carpeta de BO2 " + game_mode_name() + " no es válida. Revísala en Configuración.")
     if not isinstance(player_name, str) or not 1 <= len(player_name.strip()) <= 24 or re.search(r'[\r\n"\x00]', player_name):
         raise ValueError("El nombre de jugador no es válido (1-24 caracteres sin comillas)")
-    args = ([str(wine)] if not IS_WINDOWS else []) + [str(exe), "t6zm", wine_game_path(game), "+name", player_name.strip()]
+    args = ([str(wine)] if not IS_WINDOWS else []) + [str(exe), selected_game_mode(), wine_game_path(game), "+name", player_name.strip()]
     if lan:
         args.append("-lan")
     if server:
@@ -782,7 +789,7 @@ def launch_game(*, lan: bool = False, server: str | None = None,
                 player_name: str = "Player") -> subprocess.Popen:
     game = find_game()
     if game is None:
-        raise RuntimeError("Selecciona primero una carpeta válida de BO2 Zombies")
+        raise RuntimeError("Selecciona primero una carpeta válida de BO2 " + game_mode_name())
     exe = bootstrapper_path()
     cmd = build_game_command(game, lan=lan, server=server, player_name=player_name)
     return _spawn_wine(cmd, cwd=exe.parent.parent, logfile="game.log")
@@ -897,9 +904,12 @@ def update_engine(log: Reporter) -> None:
     log("La cuenta online se autentica desde la ventana oficial de Plutonium.")
 
 
-def fetch_servers() -> list[dict]:
+def fetch_servers(mode: str | None = None) -> list[dict]:
     """Consulta lista comunitaria HTTPS; sin credenciales y fuera del hilo Qt."""
-    url = SERVERS_API + "?" + urlencode({"game": "T6ZM", "limit": "100"})
+    mode = selected_game_mode() if mode is None else mode
+    if mode not in GAME_MODES:
+        raise ValueError("Modo de BO2 no válido")
+    url = SERVERS_API + "?" + urlencode({"game": "T6ZM" if mode == "t6zm" else "T6", "limit": "100"})
     request = urllib.request.Request(url, headers={"User-Agent": "BO2-Launcher/0.8"})
     with urllib.request.urlopen(request, timeout=15) as response:
         # Limita el tamaño del JSON procedente del proveedor externo.

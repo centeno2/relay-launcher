@@ -1,6 +1,6 @@
 <p align="center"><img src="bo2launcher/assets/relay.svg" width="76" alt="Símbolo de Relay"></p>
 <h1 align="center">Relay</h1>
-<p align="center">Tu próxima ronda empieza aquí.<br>Un launcher para <strong>BO2 Zombies + Plutonium</strong> en Linux y Windows.</p>
+<p align="center">Tu próxima ronda empieza aquí.<br>Un launcher para <strong>BO2 Zombies y Multijugador + Plutonium</strong> en Linux y Windows.</p>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/relay-dark.png">
@@ -31,7 +31,7 @@ cd relay-launcher
 
 1. **[Abre la carpeta del juego en Drive](https://drive.google.com/drive/folders/18CGqf5rwuULAL8-2XiH8-4UcGoKRUyNa?usp=sharing)**, descarga y extrae los archivos.
 2. En Relay, elige **Carpeta del juego**. En **Configuración**, pulsa **Instalar componentes** y después **Actualizar componentes**.
-3. Abre **Cuenta de Plutonium → Abrir sesión oficial**, inicia sesión y cierra esa ventana. Vuelve a **Jugar Zombies**.
+3. Elige **Zombies** o **Multijugador** en el selector superior. Abre **Cuenta de Plutonium → Abrir sesión oficial**, inicia sesión y cierra esa ventana. Vuelve y pulsa **Jugar** en el modo elegido.
 
 **A tu manera:** fotos reales de TranZit, Mob of the Dead y Buried, galería con perspectiva 3D, fondo con profundidad y temas sistema/claro/oscuro. Todo el arte funciona sin conexión; el movimiento se puede desactivar.
 Linux usa Wine + DXVK en un entorno separado. Windows ejecuta Plutonium directamente.

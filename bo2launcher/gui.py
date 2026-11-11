@@ -1,4 +1,4 @@
-"""Relay: a desktop-native home for BO2 Zombies on Linux and Windows."""
+"""Relay: Black Ops II Zombies and Multiplayer on Linux and Windows."""
 from __future__ import annotations
 import sys
 import time
@@ -108,9 +108,13 @@ class ServerWorker(QThread):
     loaded = Signal(list)
     failed = Signal(str)
 
+    def __init__(self, mode, parent=None):
+        super().__init__(parent)
+        self.mode = mode
+
     def run(self):
         try:
-            self.loaded.emit(b.fetch_servers())
+            self.loaded.emit(b.fetch_servers(self.mode))
         except Exception as exc:
             self.failed.emit(f"{type(exc).__name__}: {exc}")
 
@@ -119,7 +123,7 @@ class Launcher(QMainWindow):
     def __init__(self, theme=None):
         super().__init__()
         self.theme = theme or ThemeManager(QApplication.instance(), b.load_config().get("theme", "system"))
-        self.setWindowTitle("Relay — BO2 Zombies")
+        self.setWindowTitle("Relay — Black Ops II")
         self.resize(1180, 790)
         self.setMinimumSize(760, 560)
         self.worker = None
@@ -153,6 +157,8 @@ class Launcher(QMainWindow):
         self.make_settings()
         self.make_activity()
         self.make_servers()
+        self.apply_game_mode()
+        self.game_mode_select.currentIndexChanged.connect(self.change_game_mode)
         self.goto(0)
         self.refresh()
         # A selected folder must also exist in the provider's independent config.
@@ -206,6 +212,14 @@ class Launcher(QMainWindow):
             self.tabs.append((idx, tab))
             layout.addWidget(tab)
         layout.addStretch()
+        self.game_mode_select = QComboBox()
+        self.game_mode_select.setAccessibleName("Modo de Black Ops II")
+        self.game_mode_select.setToolTip("Elegir Zombies o Multijugador")
+        for mode, title in b.GAME_MODES.items():
+            self.game_mode_select.addItem(title, mode)
+        self.game_mode_select.setCurrentIndex(self.game_mode_select.findData(b.selected_game_mode()))
+        self.game_mode_select.setMinimumWidth(150)
+        layout.addWidget(self.game_mode_select)
         self.mode_badge = label("Modo online", "modeBadge")
         self.mode_badge.setToolTip("Modo seleccionado. La cuenta se autentica en Plutonium.")
         layout.addWidget(self.mode_badge)
@@ -214,7 +228,7 @@ class Launcher(QMainWindow):
     def update_layout(self):
         if not hasattr(self, "navigation"):
             return
-        compact = self.width() < 930
+        compact = self.width() < 1080
         short = self.height() < 660
         self.navigation.setFixedHeight(54 if short else 70)
         self.workspace_layout.setContentsMargins(16 if compact else 24, 4 if short else 12,
@@ -272,7 +286,8 @@ class Launcher(QMainWindow):
         font.setBold(True)
         self.game_title.setFont(font)
         content.addWidget(self.game_title)
-        content.addWidget(label("Z O M B I E S", "zombiesTitle"))
+        self.mode_title = label("Z O M B I E S", "zombiesTitle")
+        content.addWidget(self.mode_title)
         content.addSpacing(12)
         self.hero_note = label("Todavía queda una ronda más.", "heroNote")
         content.addWidget(self.hero_note)
@@ -389,6 +404,42 @@ class Launcher(QMainWindow):
         for widget in [self.home_background, *self.scene_tiles]:
             widget.set_motion_enabled(enabled)
 
+    def apply_game_mode(self):
+        title = b.game_mode_name()
+        self.setWindowTitle("Relay — BO2 " + title)
+        self.mode_title.setText("Z O M B I E S" if b.selected_game_mode() == "t6zm" else "MULTIJUGADOR")
+        self.hero_note.setText("Todavía queda una ronda más." if b.selected_game_mode() == "t6zm"
+                               else "Elige tu equipo. Entra a la partida.")
+        self.server_heading.setText("Servidores · BO2 " + title)
+        self.path.setPlaceholderText("Carpeta de Black Ops II " + title)
+
+    def change_game_mode(self):
+        mode = self.game_mode_select.currentData()
+        pending = self.game_process and (self.game_process.poll() is None or
+                   (self.launch_method == "uri" and self.launch_started_at is not None and
+                    time.monotonic() - self.launch_started_at < 70))
+        busy = self.worker and self.worker.isRunning()
+        try:
+            if busy or pending or b.game_session_visible():
+                raise RuntimeError("Cierra la partida o espera a que termine el inicio antes de cambiar de modo.")
+            b.save_config(game_mode=mode)
+        except (OSError, RuntimeError) as exc:
+            self.game_mode_select.blockSignals(True)
+            self.game_mode_select.setCurrentIndex(self.game_mode_select.findData(b.selected_game_mode()))
+            self.game_mode_select.blockSignals(False)
+            QMessageBox.warning(self, "Cambio de modo pendiente", str(exc))
+            return
+        self.server_rows = []
+        self.filter_servers()
+        self.server_status.setText("Pulsa Actualizar lista para consultar servidores del modo seleccionado.")
+        self.path.clear()
+        self.path.setModified(False)
+        self.apply_game_mode()
+        self.refresh()
+        self.update_path_status()
+        if self.pages.currentIndex() == 3:
+            self.refresh_servers()
+
     def refresh_mode_badge(self):
         self.mode_badge.setText("Modo LAN" if self.lan.isChecked() else "Modo online")
 
@@ -446,7 +497,7 @@ class Launcher(QMainWindow):
         appearance_layout.addWidget(self.reduce_motion)
         self.apply_motion_preference()
         lay.addWidget(appearance)
-        game, g = self.setting_group("Black Ops II", "Selecciona tu carpeta de BO2 Zombies (Steam o pluto_t6_full_game).")
+        game, g = self.setting_group("Black Ops II", "Selecciona la carpeta que contiene los archivos del modo elegido (Steam o pluto_t6_full_game).")
         self.path = QLineEdit()
         self.path.setPlaceholderText("Carpeta de Black Ops II Zombies")
         self.path.returnPressed.connect(self.save_game)
@@ -454,7 +505,7 @@ class Launcher(QMainWindow):
         buttons = QHBoxLayout()
         buttons.addWidget(button("Buscar carpeta", self.browse))
         buttons.addWidget(button("Archivos en Drive", self.open_game_files))
-        buttons.addWidget(button("Steam", lambda: QDesktopServices.openUrl(QUrl("steam://install/212910"))))
+        buttons.addWidget(button("Steam", lambda: QDesktopServices.openUrl(QUrl("steam://install/" + b.STEAM_APPS[b.selected_game_mode()]))))
         buttons.addStretch()
         buttons.addWidget(button("Guardar ruta", self.save_game))
         g.addLayout(buttons)
@@ -491,7 +542,7 @@ class Launcher(QMainWindow):
         self.lan.toggled.connect(lambda enabled: b.save_config(lan_mode=enabled))
         self.lan.toggled.connect(self.refresh_mode_badge)
         e.addWidget(self.lan)
-        e.addWidget(label("Online: Jugar utiliza el acceso oficial a Zombies con cuenta autenticada. "
+        e.addWidget(label("Online: Jugar abre el modo seleccionado con tu cuenta oficial. "
                           "LAN: inicia el motor directamente sin abrir el cliente de sesión. "
                           "La primera autenticación siempre se realiza en el cliente oficial.", "hint", True))
         row = QHBoxLayout()
@@ -575,7 +626,8 @@ class Launcher(QMainWindow):
 
     def make_servers(self):
         lay = self.scroll_page()
-        lay.addWidget(label("Servidores · BO2 Zombies", "heading"))
+        self.server_heading = label("Servidores · BO2", "heading")
+        lay.addWidget(self.server_heading)
         lay.addWidget(label("Listado externo proporcionado por GameServe.rs (no oficial de Plutonium).", "caption"))
         bar = QHBoxLayout()
         self.server_filter = QLineEdit()
@@ -609,15 +661,23 @@ class Launcher(QMainWindow):
     def refresh_servers(self):
         if self.server_worker and self.server_worker.isRunning():
             return
-        self.server_status.setText("Consultando servidores de BO2 Zombies...")
+        self.server_status.setText("Consultando servidores de BO2 " + b.game_mode_name() + "…")
         self.server_refresh.setEnabled(False)
-        self.server_worker = ServerWorker(self)
-        self.server_worker.loaded.connect(self.show_servers)
-        self.server_worker.failed.connect(self.server_error)
-        self.server_worker.finished.connect(lambda: self.server_refresh.setEnabled(True))
+        mode = b.selected_game_mode()
+        self.server_worker = ServerWorker(mode, self)
+        self.server_worker.loaded.connect(lambda rows: self.show_servers(rows, mode))
+        self.server_worker.failed.connect(lambda error: self.server_error(error) if mode == b.selected_game_mode() else None)
+        self.server_worker.finished.connect(lambda: self.server_request_finished(mode))
         self.server_worker.start()
 
-    def show_servers(self, rows):
+    def server_request_finished(self, mode):
+        self.server_refresh.setEnabled(True)
+        if mode != b.selected_game_mode() and self.pages.currentIndex() == 3:
+            self.refresh_servers()
+
+    def show_servers(self, rows, mode=None):
+        if mode is not None and mode != b.selected_game_mode():
+            return
         self.server_rows = rows
         self.filter_servers()
         self.server_status.setText(f"{len(rows)} servidores recibidos · Datos de GameServe.rs; no garantizan disponibilidad.")
@@ -754,17 +814,18 @@ class Launcher(QMainWindow):
                 self.play.setText("Abriendo cuenta…")
             elif self.launch_method == "uri":
                 self.game_state.setText("Iniciando desde tu cuenta oficial...")
-                self.game_detail.setText("Se ha solicitado BO2 Zombies mediante la URI oficial. "
+                self.game_detail.setText("Se ha solicitado BO2 " + b.game_mode_name() + " mediante la URI oficial. "
                                          "Si aparece la pantalla de sesión, autentícate allí.")
-                self.play.setText("Abriendo Zombies…")
+                self.play.setText("Abriendo " + b.game_mode_name() + "…")
             else:
-                self.game_state.setText("Iniciando Zombies (LAN)...")
+                self.game_state.setText("Iniciando " + b.game_mode_name() + " (LAN)…")
                 self.game_detail.setText("Inicio local sin servidores públicos.")
                 self.play.setText("Iniciando…")
             self.play.setEnabled(False)
+            self.game_mode_select.setEnabled(False)
             if server:
                 QApplication.clipboard().setText("connect " + server)
-                self.write_log("URI oficial abre T6ZM; copia el comando connect desde el portapapeles y "
+                self.write_log("Copia el comando connect desde el portapapeles y "
                                "pégalo en la consola del juego cuando inicie.")
             QTimer.singleShot(2400, self.check_game)
         except Exception as exc:
@@ -777,10 +838,11 @@ class Launcher(QMainWindow):
         actual_game = b.game_session_visible()
         if actual_game:
             self.seen_game = True
-            self.game_state.setText("Zombies en curso")
+            self.game_state.setText("BO2 en curso")
             self.game_detail.setText("El motor de BO2 está abierto. ¡Disfruta la partida!")
             self.play.setText("En partida")
             self.play.setEnabled(False)
+            self.game_mode_select.setEnabled(False)
             return
         if self.seen_game:
             # User closed BO2: restore the normal JUGAR state, not REINTENTAR.
@@ -791,7 +853,7 @@ class Launcher(QMainWindow):
             self.refresh()
             self.game_state.setText("Partida finalizada")
             self.game_detail.setText("El juego se cerró normalmente. Puedes volver a jugar.")
-            self.play.setText("Jugar Zombies")
+            self.play.setText("Jugar " + b.game_mode_name())
             self.play.setEnabled(True)
             return
         if self.game_process is None:
@@ -801,11 +863,12 @@ class Launcher(QMainWindow):
         # The URI launcher can exit immediately after handing T6 to the bootstrapper.
         # Give Wine enough time to start the child even when the initial PID exits.
         if self.launch_method == "uri" and elapsed < 70:
-            self.game_state.setText("Iniciando Zombies...")
+            self.game_state.setText("Iniciando " + b.game_mode_name() + "…")
             self.game_detail.setText("El cliente oficial entregó el inicio al motor T6. "
                                      "Esperando que aparezca su proceso o consola.")
             self.play.setText("Iniciando…")
             self.play.setEnabled(False)
+            self.game_mode_select.setEnabled(False)
             if code is not None and not self.launcher_exit_logged:
                 self.launcher_exit_logged = True
                 self.write_log(f"Cliente online terminó código {code}; esperando motor independiente.")
@@ -815,18 +878,21 @@ class Launcher(QMainWindow):
             self.game_detail.setText("Termina el inicio de sesión en la ventana oficial.")
             self.play.setText("Abriendo cuenta…")
             self.play.setEnabled(False)
+            self.game_mode_select.setEnabled(False)
             return
         if code is None and elapsed < 70:
-            self.game_state.setText("Iniciando Zombies...")
+            self.game_state.setText("Iniciando " + b.game_mode_name() + "…")
             self.game_detail.setText("Esperando al motor T6...")
             self.play.setText("Iniciando…")
             self.play.setEnabled(False)
+            self.game_mode_select.setEnabled(False)
             return
         if code is None:
             self.game_state.setText("Arranque sin confirmar")
             self.game_detail.setText("El proceso sigue abierto. Comprueba el juego y revisa Actividad.")
             self.play.setText("Esperando juego")
             self.play.setEnabled(False)
+            self.game_mode_select.setEnabled(False)
             return
         self.write_log(f"No se detectó el motor tras iniciar el cliente ({code}). Registros en Actividad.")
         self.game_process = None
@@ -835,7 +901,7 @@ class Launcher(QMainWindow):
         self.refresh()
         self.game_state.setText("No se confirmó el arranque")
         self.game_detail.setText("Puedes intentar nuevamente o revisar el registro.")
-        self.play.setText("Jugar Zombies")
+        self.play.setText("Jugar " + b.game_mode_name())
         self.play.setEnabled(True)
 
     def goto(self, idx: int):
@@ -868,12 +934,13 @@ class Launcher(QMainWindow):
                        (self.launch_method == "uri" and self.launch_started_at is not None and
                         time.monotonic() - self.launch_started_at < 70)))
         self.play.setEnabled(not busy and not playing and not pending)
+        self.game_mode_select.setEnabled(not busy and not playing and not pending)
         self.setup_button.setEnabled(not busy)
         self.deps_button.setEnabled(not busy)
         if ready:
             self.game_state.setText("Listo para jugar")
-            self.game_detail.setText("Inicia Zombies directamente desde esta aplicación.")
-            self.play.setText("Jugar Zombies")
+            self.game_detail.setText("Inicia " + b.game_mode_name() + " directamente desde esta aplicación.")
+            self.play.setText("Jugar " + b.game_mode_name())
         elif prepared and not bootstrapper:
             self.game_state.setText("Falta preparar el motor de juego")
             self.game_detail.setText("Actualiza los componentes en Configuración. "
@@ -881,7 +948,7 @@ class Launcher(QMainWindow):
             self.play.setText("Preparar juego")
         elif not game:
             self.game_state.setText("Faltan archivos del juego")
-            self.game_detail.setText("Selecciona tu carpeta de Black Ops II en Configuración.")
+            self.game_detail.setText("Selecciona una carpeta que contenga los archivos de " + b.game_mode_name() + ".")
             self.play.setText("Configurar juego")
         else:
             self.game_state.setText("Instalación pendiente")
@@ -890,7 +957,7 @@ class Launcher(QMainWindow):
         missing = [name for name, ok in components if not ok]
         self.runtime.setText("Componentes listos" if not missing else "Pendientes: " + ", ".join(missing))
         if playing:
-            self.game_state.setText("BO2 Zombies detectado")
+            self.game_state.setText("BO2 detectado")
             self.play.setText("En partida")
         elif pending:
             self.game_state.setText("Inicio solicitado (sin confirmar)")
@@ -912,7 +979,7 @@ class Launcher(QMainWindow):
         raw = self.path.text().strip()
         path = Path(raw).expanduser() if raw else None
         if not path or not b.is_game_dir(path):
-            QMessageBox.warning(self, "Carpeta incorrecta", "Selecciona la carpeta que contiene zone/ y los datos de BO2 Zombies.")
+            QMessageBox.warning(self, "Carpeta incorrecta", "Selecciona la carpeta que contiene zone/ y los datos de BO2 " + b.game_mode_name() + ".")
             return
         b.save_config(game_dir=str(path.resolve()))
         self.path.setModified(False)
@@ -1012,6 +1079,7 @@ class Launcher(QMainWindow):
         self.setup_button.setEnabled(False)
         self.deps_button.setEnabled(False)
         self.play.setEnabled(False)
+        self.game_mode_select.setEnabled(False)
         self.worker.start()
 
     def complete_task(self, error):

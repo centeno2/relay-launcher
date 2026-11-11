@@ -51,7 +51,7 @@ def quoted(value):
 
 Path(sys.argv[1]).write_text('\n'.join([
     '[Desktop Entry]', 'Type=Application', 'Name=Relay',
-    'GenericName=BO2 Zombies Launcher', 'Comment=Tu próxima ronda empieza aquí.',
+    'GenericName=Black Ops II Launcher', 'Comment=Tu próxima ronda empieza aquí.',
     'Exec=' + quoted(sys.argv[2]), 'Icon=' + sys.argv[3],
     'Terminal=false', 'Categories=Game;', 'StartupNotify=true',
     'StartupWMClass=bo2-launcher', '',

@@ -21,22 +21,28 @@ Descarga y extrae el juego desde la
 o selecciona tu instalación de Steam. El enlace de Drive es el compartido por
 el mantenedor; sus permisos y disponibilidad dependen de Google Drive.
 
-Selecciona la carpeta que contiene `zone/` y los datos de Zombies, no el ZIP
+Selecciona la carpeta que contiene `zone/` y los datos del modo seleccionado, no el ZIP
 ni la carpeta que contiene todas tus bibliotecas. Relay también busca las
 bibliotecas registradas de Steam.
 
 En **Configuración**, instala los componentes y actualízalos. En
 **Cuenta de Plutonium**, abre la sesión oficial para autenticarte la primera
-vez. Cierra esa ventana y pulsa **Jugar Zombies**. Relay sincroniza la ruta
+vez. Cierra esa ventana, elige **Zombies** o **Multijugador** en el selector superior y pulsa **Jugar**. Relay sincroniza la ruta
 del juego con Plutonium y conserva una copia de la configuración anterior.
 Consulta también la [guía oficial de instalación](https://plutonium.pw/docs/install/).
+
+**Cambiar entre Zombies y Multijugador:** usa el selector superior de Relay.
+Se recuerda el último modo. Cierra la partida antes de cambiar: Plutonium abre
+cada modo por separado. Si falta Multijugador, instala ese componente en Steam
+o selecciona una carpeta que lo incluya. La galería de Zombies solo cambia el
+fondo; no el modo de juego. El navegador de servidores sigue el modo elegido.
 
 **LAN / sin conexión** inicia el motor local; necesita los componentes ya
 instalados y no permite entrar a servidores públicos. El nombre de jugador
 configurado en Relay se utiliza en este modo.
 
 **Servidores** consulta GameServe.rs. La acción de jugar copia `connect IP:puerto`
-al portapapeles e inicia Zombies: pega ese comando en la consola del juego.
+al portapapeles e inicia el modo seleccionado: pega ese comando en la consola del juego.
 
 ## Escritorio y datos
 

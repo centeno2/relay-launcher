@@ -279,7 +279,7 @@ class TestSessionRecoveryAndGameState(unittest.TestCase):
                 self.assertFalse(b.game_process_alive(proc))
                 (fake_proc / "environ").write_bytes(('WINEPREFIX=' + str(prefix)).encode() + b'\0')
                 (fake_proc / "cmdline").write_bytes(b'wine\0t6mp.exe\0')
-                self.assertFalse(b.game_process_alive(proc))
+                self.assertTrue(b.game_process_alive(proc))  # Multiplayer also blocks a second launch
 
     def test_game_scan_without_proc_returns_false(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -459,9 +459,9 @@ class TestGameDetection2026(unittest.TestCase):
         self.assertTrue(b._process_is_t6(b'wine\0plutonium-bootstrapper-win32.exe\0t6zm\0'))
         self.assertTrue(b._process_is_t6(b'wine\0Z:\\Plutonium\\bin\\plutonium-bootstrapper-win32.exe\0t6zm\0'))
 
-    def test_other_wine_processes_not_zombies(self):
+    def test_game_modes_count_but_launcher_and_wineserver_do_not(self):
         self.assertFalse(b._process_is_t6(b'wine\0plutonium-launcher-win32.exe\0plutonium://play/t6zm\0'))
-        self.assertFalse(b._process_is_t6(b'wine\0plutonium-bootstrapper-win32.exe\0t6mp\0'))
+        self.assertTrue(b._process_is_t6(b'wine\0plutonium-bootstrapper-win32.exe\0t6mp\0'))
         self.assertFalse(b._process_is_t6(b'wineserver\0'))
 
     def test_game_process_comm_for_wine_exe(self):

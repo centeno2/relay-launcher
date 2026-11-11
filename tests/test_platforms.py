@@ -96,10 +96,10 @@ class WindowsBackendTests(unittest.TestCase):
         self.assertEqual(json.loads(backup.read_text(encoding="utf-8")), original)
         self.assertFalse(b.sync_official_game_path(self.game))
 
-    def test_only_zombies_processes_count_as_game(self):
+    def test_both_game_modes_count_but_launcher_does_not(self):
         for name, args, expected in (
             ("plutonium-launcher-win32.exe", [b.OFFICIAL_T6ZM_URI], False),
-            (b.BOOTSTRAPPER_EXE, [str(self.bootstrapper), "t6mp"], False),
+            (b.BOOTSTRAPPER_EXE, [str(self.bootstrapper), "t6mp"], True),
             (b.BOOTSTRAPPER_EXE, [str(self.bootstrapper), "t6zm"], True),
             ("t6zm.exe", [], True),
         ):

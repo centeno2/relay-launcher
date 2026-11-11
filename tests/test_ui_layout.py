@@ -58,8 +58,8 @@ class TestDesktopUI(unittest.TestCase):
         self.assertEqual(self.window.width(), 760)
         self.assertEqual(self.window.height(), 560)
         for control in [self.window.play, self.window.drive_button, self.window.folder_button,
-                        self.window.servers_button, *self.window.scene_tiles] + [tab for _, tab in self.window.tabs]:
-            with self.subTest(text=control.text()):
+                        self.window.servers_button, self.window.game_mode_select, *self.window.scene_tiles] + [tab for _, tab in self.window.tabs]:
+            with self.subTest(control=control.accessibleName() or type(control).__name__):
                 self.assertTrue(control.isVisible())
                 top = control.mapTo(self.window, control.rect().topLeft())
                 bottom = control.mapTo(self.window, control.rect().bottomRight())
@@ -128,6 +128,47 @@ class TestDesktopUI(unittest.TestCase):
             self.window.goto(1)
             self.assertEqual(self.window.home_background.motion.state(), QAbstractAnimation.State.Stopped)
             self.assertEqual(self.window.home_background.offset, QPointF())
+
+    def test_multiplayer_selection_updates_labels_persists_and_launches(self):
+        self.window.game_mode_select.setCurrentIndex(1)
+        self.assertEqual(b.load_config()['game_mode'], 't6mp')
+        self.assertEqual(self.window.mode_title.text(), 'MULTIJUGADOR')
+        self.assertIn('Multijugador', self.window.server_heading.text())
+        process = mock.Mock(pid=123)
+        process.poll.return_value = None
+        def launch():
+            self.assertEqual(b.selected_game_mode(), 't6mp')
+            return process, 'uri'
+        with mock.patch.object(b, 'launch_online_game', side_effect=launch) as start:
+            self.window.start_game()
+        start.assert_called_once()
+        self.assertIn('Multijugador', self.window.play.text())
+        self.assertFalse(self.window.game_mode_select.isEnabled())
+        self.window.game_process = None
+        self.window.launch_started_at = None
+        other = Launcher(self.theme)
+        try:
+            self.assertEqual(other.game_mode_select.currentData(), 't6mp')
+        finally:
+            other.close()
+            other.deleteLater()
+
+    def test_mode_switch_discards_old_server_results(self):
+        row = dict(name='Old Zombies', map='Origins', players='1/8', address='1.2.3.4:1234')
+        self.window.show_servers([row], 't6zm')
+        self.window.game_mode_select.setCurrentIndex(1)
+        self.assertEqual(self.window.server_table.rowCount(), 0)
+        self.window.show_servers([row], 't6zm')
+        self.assertEqual(self.window.server_table.rowCount(), 0)
+        self.window.show_servers([dict(row, name='MP', map='Raid')], 't6mp')
+        self.assertEqual(self.window.server_table.rowCount(), 1)
+
+    def test_mode_switch_is_blocked_during_a_game(self):
+        with mock.patch.object(b, 'game_session_visible', return_value=True), \
+             mock.patch('bo2launcher.gui.QMessageBox.warning'):
+            self.window.game_mode_select.setCurrentIndex(1)
+        self.assertEqual(b.selected_game_mode(), 't6zm')
+        self.assertEqual(self.window.game_mode_select.currentData(), 't6zm')
 
     def test_desktop_disabled_animations_are_respected(self):
         with mock.patch.object(QApplication, 'isEffectEnabled', return_value=False):
